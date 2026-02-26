@@ -1,19 +1,19 @@
 import { DailyWeatherRow } from "./weatherStore.service";
 
-export async function fetchForecastDailyWeather(args: {
+export async function fetchArchiveDailyWeather(args: {
   latitude: number;
   longitude: number;
-  days?: number;
+  start_date: string;
+  end_date: string;
 }): Promise<DailyWeatherRow[]> {
 
-  const days = args.days ?? 7;
-
-  const url = new URL("https://api.open-meteo.com/v1/forecast");
+  const url = new URL("https://archive-api.open-meteo.com/v1/archive");
 
   url.searchParams.set("latitude", String(args.latitude));
   url.searchParams.set("longitude", String(args.longitude));
+  url.searchParams.set("start_date", args.start_date);
+  url.searchParams.set("end_date", args.end_date);
   url.searchParams.set("timezone", "Asia/Kathmandu");
-  url.searchParams.set("forecast_days", String(days));
 
   url.searchParams.set(
     "daily",
@@ -31,7 +31,7 @@ export async function fetchForecastDailyWeather(args: {
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Forecast API failed: ${res.status} ${res.statusText} ${text}`);
+    throw new Error(`Archive API failed: ${res.status} ${res.statusText} ${text}`);
   }
 
   const data = await res.json();
