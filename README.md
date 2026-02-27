@@ -71,8 +71,8 @@ Location Used:
 
 
 # Model Retraining Strategy ( IN Future)
-Retrained Monthly
-Uses Newly stored weather data
-Improves accuracy over time
+- Retrained Monthly
+- Uses Newly stored weather data
+- Improves accuracy over time
 
 
