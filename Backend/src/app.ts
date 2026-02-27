@@ -9,7 +9,7 @@
 import express from "express";
 import "dotenv/config";
 import { weatherRouter } from "./routes/weather.routes";
-
+import { mlRouter } from "./routes/ml.routes";
 export const app = express();
 const port = Number(process.env.PORT);
 /*
@@ -21,6 +21,7 @@ app.use(express.json());
 
 app.get("/Check", (_, res) => res.json({ "Details": "Everything is Good!!" }));
 app.use("/api/weather", weatherRouter)
+app.use("/api/ml", mlRouter);
 app.listen(port, () => {
   console.log(`Server running at http://localhost:${port}`);
 });
