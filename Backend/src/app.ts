@@ -23,7 +23,7 @@ app.use("/api/weather", weatherRouter);
 app.use("/api/sensor", sensorRouter);
 app.use("/api/alerts", alertsRouter);
 app.use("/api/ml", mlRouter);
-
+const PORT = process.env.PORT || 10000;
 app.listen(config.port, "0.0.0.0", async () => {
   console.log(`Server running at http://0.0.0.0:${config.port}`);
 
