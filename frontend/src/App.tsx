@@ -1,22 +1,20 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Navbar from "./components/Navbar";
-import Home from "./pages/Home";
-import Readings from "./pages/Readings";
-import Forecast from "./pages/Forecast";
-import Notifications from "./pages/Notifications";
+import { Suspense, lazy } from "react";
+import { Routes, Route } from "react-router-dom";
+
+const Home = lazy(() => import("./pages/Home"));
+const Readings = lazy(() => import("./pages/Readings"));
+const Forecast = lazy(() => import("./pages/Forecast"));
+const Notifications = lazy(() => import("./pages/Notifications"));
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <div className="app-shell">
-        <Navbar />
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/readings" element={<Readings />} />
-          <Route path="/forecast" element={<Forecast />} />
-          <Route path="/notifications" element={<Notifications />} />
-        </Routes>
-      </div>
-    </BrowserRouter>
+    <Suspense fallback={<div>Loading...</div>}>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/readings" element={<Readings />} />
+        <Route path="/forecast" element={<Forecast />} />
+        <Route path="/notifications" element={<Notifications />} />
+      </Routes>
+    </Suspense>
   );
 }
