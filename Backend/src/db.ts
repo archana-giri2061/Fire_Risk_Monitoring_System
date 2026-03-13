@@ -1,15 +1,15 @@
 import { Pool } from "pg";
 import "dotenv/config";
 
-const useSSL = process.env.DB_SSL === "true";
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL is not set");
+}
+
+const isRender = process.env.NODE_ENV === "production";
 
 export const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT),
-  database: process.env.DB_NAME,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  ssl: useSSL ? { rejectUnauthorized: false } : false,
+  connectionString: process.env.DATABASE_URL,
+  ssl: isRender ? { rejectUnauthorized: false } : false,
 });
 
 export async function testDbConnection() {
