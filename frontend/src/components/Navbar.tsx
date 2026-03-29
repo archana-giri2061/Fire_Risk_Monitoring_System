@@ -10,9 +10,9 @@ export default function Navbar() {
       </div>
 
       <nav className="navbar__center">
-        <a href="#home" className="active">Home</a>
-        <a href="#readings">Readings</a>
-        <a href="#forecast">Forecast</a>
+        <a href="home" className="active">Home</a>
+        <a href="readings">Readings</a>
+        <a href="forecast">Forecast</a>
       </nav>
 
      <div className="navbar__right">

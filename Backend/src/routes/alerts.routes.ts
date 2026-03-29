@@ -1,16 +1,155 @@
 import { Router } from "express";
 import { config } from "../config";
-import { runRiskEmailAlerts } from "../services/alertEngine.service";
+import { runRiskEmailAlerts, sendIoTFireAlert } from "../services/alertEngine.service";
+import { sendEmailAlert } from "../services/email.service";
+import { pool } from "../db";
 
 export const alertsRouter = Router();
 
-alertsRouter.post("/run-email", async (_req, res) => {
+// ── POST /api/alerts/run-email ─────────────────────────────────────────────
+alertsRouter.post("/run-email", async (req, res) => {
   try {
+    const minRisk = (req.body?.minRisk as "High" | "Extreme") ?? "High";
+    const extraTo = Array.isArray(req.body?.extraTo) ? req.body.extraTo : [];
+    // Optional IoT context from IoTMonitor page
+    const iotNote = req.body?.note as string | undefined;
+
     const result = await runRiskEmailAlerts({
-      latitude: config.latitude,
-      longitude: config.longitude,
-      location_key: config.locationKey,
-      minRisk: "High",
+      latitude:      config.latitude,
+      longitude:     config.longitude,
+      location_key:  config.locationKey,
+      minRisk,
+      extraTo,
+      iotNote,
+    });
+
+    res.json(result);
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ── GET /api/alerts/status ────────────────────────────────────────────────
+alertsRouter.get("/status", async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT date, risk_code, risk_label,
+              COALESCE(risk_probability, 0) AS risk_probability,
+              model_name, created_at
+       FROM fire_risk_predictions
+       WHERE latitude  = $1
+         AND longitude = $2
+         AND date >= CURRENT_DATE
+       ORDER BY date ASC
+       LIMIT 7`,
+      [config.latitude, config.longitude],
+    );
+
+    const highRisk = rows.filter((r) =>
+      ["High", "Extreme"].includes(r.risk_label),
+    );
+
+    res.json({
+      ok:           true,
+      location:     config.locationKey,
+      total:        rows.length,
+      highRiskDays: highRisk.length,
+      alertNeeded:  highRisk.length > 0,
+      predictions:  rows.map((r) => ({
+        date:             String(r.date).slice(0, 10),
+        risk_code:        r.risk_code,
+        risk_label:       r.risk_label,
+        risk_probability: Number(r.risk_probability).toFixed(3),
+        model_name:       r.model_name,
+      })),
+    });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ── GET /api/alerts/history ───────────────────────────────────────────────
+alertsRouter.get("/history", async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit ?? 20), 100);
+
+    const { rows } = await pool.query(
+      `SELECT id, location_key, risk_label, alert_date, message, created_at
+       FROM alert_logs
+       ORDER BY created_at DESC
+       LIMIT $1`,
+      [limit],
+    );
+
+    res.json({
+      ok:    true,
+      count: rows.length,
+      data:  rows.map((r) => ({
+        ...r,
+        alert_date: String(r.alert_date).slice(0, 10),
+      })),
+    });
+  } catch (e: any) {
+    if (e.message?.includes("does not exist")) {
+      return res.json({
+        ok:    true,
+        count: 0,
+        data:  [],
+        note:  "Run sql/create_tables.sql first to create the alert_logs table.",
+      });
+    }
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ── POST /api/alerts/test-email ───────────────────────────────────────────
+alertsRouter.post("/test-email", async (_req, res) => {
+  try {
+    await sendEmailAlert(
+      " Test Email — Wildfire Alert System",
+      [
+        "This is a test email from your Wildfire Risk Monitoring System.",
+        "",
+        "If you received this, your SMTP configuration is working correctly.",
+        "",
+        `Location : ${config.locationKey}`,
+        `Coords   : lat=${config.latitude}, lon=${config.longitude}`,
+        `SMTP Host: ${config.smtp.host}`,
+        "",
+        "Wildfire Risk Monitoring System",
+      ].join("\n"),
+    );
+
+    res.json({
+      ok:      true,
+      message: "Test email sent successfully.",
+      to:      config.smtp.to,
+    });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ── POST /api/alerts/iot-fire ─────────────────────────────────────────────
+// Called directly when IoT sensor detects fire/extreme smoke
+alertsRouter.post("/iot-fire", async (req, res) => {
+  try {
+    const {
+      deviceId   = "unknown",
+      deviceName = "IoT Sensor",
+      location   = config.locationKey,
+      smokePpm   = 0,
+      temperature = 0,
+      fireDetected = false,
+    } = req.body ?? {};
+
+    const result = await sendIoTFireAlert({
+      deviceId,
+      deviceName,
+      location,
+      smokePpm:    Number(smokePpm),
+      temperature: Number(temperature),
+      fireDetected: Boolean(fireDetected),
     });
 
     res.json(result);
