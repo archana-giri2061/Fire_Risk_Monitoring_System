@@ -9,6 +9,7 @@ import { alertsRouter } from "./routes/alerts.routes";
 import { dashboardRouter } from "./routes/dashboard.routes";
 import { syncWeatherData } from "./services/WeatherSync.service";
 import { autoAlertAfterPrediction } from "./services/alertEngine.service";
+import { sendDailyRiskReport } from "./services/dailyReport.service";
 import { spawn } from "child_process";
 import path from "path";
 
@@ -28,7 +29,6 @@ app.use("/api/alerts",    alertsRouter);
 app.use("/api/ml",        mlRouter);
 app.use("/api/dashboard", dashboardRouter);
 
-// ── helper: run python script ──────────────────────────────────────────────
 function runPython(scriptRelPath: string): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const scriptPath = path.resolve(process.cwd(), scriptRelPath);
@@ -44,91 +44,83 @@ function runPython(scriptRelPath: string): Promise<{ code: number; stdout: strin
   });
 }
 
-// ── full pipeline: sync → train → predict → alert ─────────────────────────
 async function runFullPipeline(label: string): Promise<void> {
   console.log(`\n${"─".repeat(50)}`);
   console.log(` [${label}] Starting full pipeline …`);
   console.log(`${"─".repeat(50)}`);
 
-  // 1. Sync weather data (delete old + fetch new)
-  try {
-    await syncWeatherData();
-  } catch (err: any) {
-    console.error(` [${label}] Weather sync failed: ${err.message}`);
-    return; // Don't proceed if sync fails
-  }
+  try { await syncWeatherData(); }
+  catch (err: any) { console.error(` [${label}] Weather sync failed: ${err.message}`); return; }
 
-  // 2. Retrain model on fresh data
-  console.log(`\n [${label}] Retraining model on fresh data …`);
   const trainResult = await runPython("ml/scripts/train_model.py");
-  if (trainResult.code !== 0) {
-    console.error(` [${label}] Training failed:\n${trainResult.stderr}`);
-    return;
-  }
-  console.log(` [${label}] Model retrained successfully`);
+  if (trainResult.code !== 0) { console.error(` [${label}] Training failed:\n${trainResult.stderr}`); return; }
 
-  // 3. Test model against fresh archive data
-  console.log(`\n [${label}] Testing model against archive data …`);
   const testResult = await runPython("ml/scripts/test_with_archive.py");
-  if (testResult.code !== 0) {
-    console.warn(`  [${label}] Archive test failed (non-fatal):\n${testResult.stderr}`);
-    // Continue even if test fails
-  } else {
-    console.log(` [${label}] Archive test completed`);
-  }
+  if (testResult.code !== 0) console.warn(`  [${label}] Archive test failed (non-fatal)`);
 
-  // 4. Predict next 7 days
-  console.log(`\n [${label}] Predicting next 7 days …`);
   const predictResult = await runPython("ml/scripts/predict_forecast.py");
-  if (predictResult.code !== 0) {
-    console.error(` [${label}] Prediction failed:\n${predictResult.stderr}`);
-    return;
-  }
-  console.log(` [${label}] Forecast predictions stored`);
+  if (predictResult.code !== 0) { console.error(` [${label}] Prediction failed:\n${predictResult.stderr}`); return; }
 
-  // 5. Auto-send email alert if High/Extreme risk found
-  console.log(`\n [${label}] Checking for alert conditions …`);
-  const alertResult = await autoAlertAfterPrediction();
-  if (alertResult.sent) {
-    console.log(` [${label}] Alert email sent — ${alertResult.alerts} high-risk day(s) detected`);
+  const extremeAlert = await autoAlertAfterPrediction();
+  if (extremeAlert.sent) {
+    console.log(` [${label}] 🔴 Alert sent — ${extremeAlert.alerts} day(s) flagged`);
   } else {
-    console.log(` [${label}] No high-risk alert needed — ${alertResult.message}`);
+    console.log(` [${label}] No alert needed — ${extremeAlert.message}`);
   }
 
-  console.log(`\n [${label}] Full pipeline completed successfully`);
-  console.log(`${"─".repeat(50)}\n`);
+  console.log(`\n [${label}] Pipeline completed\n${"─".repeat(50)}\n`);
 }
 
-// ── startup sync with retry ────────────────────────────────────────────────
 async function startupPipeline(attempt = 1): Promise<void> {
   try {
     await runFullPipeline("Startup");
   } catch (error: any) {
-    console.error(`Startup pipeline attempt ${attempt} failed: ${error.message}`);
     if (attempt < 5) {
       const waitSecs = attempt * 10;
-      console.log(`   Retrying in ${waitSecs}s …`);
       setTimeout(() => startupPipeline(attempt + 1), waitSecs * 1000);
-    } else {
-      console.error("   Giving up. Use POST /api/weather/sync-all or POST /api/ml/run-all manually.");
     }
   }
 }
 
-// ── start server ───────────────────────────────────────────────────────────
+// ── Daily 10:35 AM Report Scheduler ───────────────────────────────────────
+function scheduleDailyReport(): void {
+  function getMillisUntil1035(): number {
+    const now  = new Date();
+    const next = new Date();
+    next.setHours(12, 0, 0, 0);
+    if (now >= next) next.setDate(next.getDate() + 1);
+    return next.getTime() - now.getTime();
+  }
+
+  function scheduleNext(): void {
+    const ms  = getMillisUntil1035();
+    const hrs = (ms / 3600000).toFixed(2);
+    console.log(` [Daily Report] Next report in ${hrs}h (at 12:00 PM)`);
+
+    setTimeout(async () => {
+      console.log("\n [Daily Report] Sending daily fire risk report …");
+      const result = await sendDailyRiskReport();
+      if (result.sent) {
+        console.log(` [Daily Report] ✅ Sent | Risk: ${result.riskLevel}`);
+      } else {
+        console.log(` [Daily Report] ⚠️  Skipped: ${result.message}`);
+      }
+      scheduleNext();
+    }, ms);
+  }
+
+  scheduleNext();
+}
+
+// ── Start server ───────────────────────────────────────────────────────────
 app.listen(config.port, "0.0.0.0", () => {
   console.log(` Server running at http://0.0.0.0:${config.port}`);
 
-  if (config.syncOnStart) {
-    // Wait 3 seconds for server to fully start before hitting network
-    setTimeout(() => startupPipeline(), 3000);
-  }
+  if (config.syncOnStart) setTimeout(() => startupPipeline(), 3000);
 
-  // Run full pipeline on every scheduled interval
   const intervalMs = config.syncIntervalMinutes * 60 * 1000;
-  console.log(` Full pipeline scheduled every ${config.syncIntervalMinutes} minutes`);
+  console.log(` Pipeline scheduled every ${config.syncIntervalMinutes} minutes`);
+  setInterval(() => runFullPipeline("Scheduled"), intervalMs);
 
-  setInterval(async () => {
-    await runFullPipeline("Scheduled");
-  }, intervalMs);
+  scheduleDailyReport();
 });

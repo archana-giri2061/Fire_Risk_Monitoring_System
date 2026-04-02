@@ -3,6 +3,7 @@ import Dashboard from "./pages/Home";
 import Landing from "./pages/LandingPage";
 import Forecast from "./pages/Forecast";
 import IoTMonitor from "./pages/Iotmonitor";
+import Alerts from "./pages/alerts";
 
 export default function App() {
   return (
@@ -13,6 +14,7 @@ export default function App() {
           <Route path="/home"     element={<Dashboard />} />
           <Route path="/forecast" element={<Forecast />} />
           <Route path="/iot"      element={<IoTMonitor />} />
+          <Route path="/alerts"   element={<Alerts />} />
           <Route path="*"         element={<Navigate to="/" replace />} />
         </Routes>
       </div>

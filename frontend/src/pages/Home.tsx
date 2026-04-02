@@ -55,11 +55,12 @@ function SparkBar({ values, color }: { values: number[]; color: string }) {
 export function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean; setCollapsed: (v: boolean) => void }) {
   const loc = useLocation();
   const links = [
-    { to: "/home",     icon: <LayoutDashboard size={18} />, label: "Dashboard" },
-    { to: "/forecast", icon: <CalendarDays size={18} />,    label: "Forecast" },
-    { to: "/iot",      icon: <Wifi size={18} />,            label: "IoT Monitor" },
-    { to: "/",         icon: <Activity size={18} />,        label: "Home" },
-  ];
+  { to: "/home",     icon: <LayoutDashboard size={18} />, label: "Dashboard"   },
+  { to: "/forecast", icon: <CalendarDays size={18} />,    label: "Forecast"    },
+  { to: "/iot",      icon: <Wifi size={18} />,            label: "IoT Monitor" },
+  { to: "/alerts",   icon: <Bell size={18} />,            label: "Alerts"      },
+  { to: "/",         icon: <Activity size={18} />,        label: "Home"        },
+];
   return (
     <aside style={{
       width: collapsed ? 68 : 220, minHeight: "100vh", flexShrink: 0,

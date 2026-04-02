@@ -2,6 +2,7 @@ import { Router } from "express";
 import { config } from "../config";
 import { runRiskEmailAlerts, sendIoTFireAlert } from "../services/alertEngine.service";
 import { sendEmailAlert } from "../services/email.service";
+import { sendDailyRiskReport } from "../services/dailyReport.service";
 import { pool } from "../db";
 
 export const alertsRouter = Router();
@@ -11,18 +12,44 @@ alertsRouter.post("/run-email", async (req, res) => {
   try {
     const minRisk = (req.body?.minRisk as "High" | "Extreme") ?? "High";
     const extraTo = Array.isArray(req.body?.extraTo) ? req.body.extraTo : [];
-    // Optional IoT context from IoTMonitor page
     const iotNote = req.body?.note as string | undefined;
 
     const result = await runRiskEmailAlerts({
-      latitude:      config.latitude,
-      longitude:     config.longitude,
-      location_key:  config.locationKey,
+      latitude:     config.latitude,
+      longitude:    config.longitude,
+      location_key: config.locationKey,
       minRisk,
       extraTo,
       iotNote,
     });
 
+    res.json(result);
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ── POST /api/alerts/run-extreme ───────────────────────────────────────────
+// Manually trigger an Extreme-only alert check
+alertsRouter.post("/run-extreme", async (_req, res) => {
+  try {
+    const result = await runRiskEmailAlerts({
+      latitude:     config.latitude,
+      longitude:    config.longitude,
+      location_key: config.locationKey,
+      minRisk:      "Extreme",
+    });
+    res.json(result);
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ── POST /api/alerts/daily-report ─────────────────────────────────────────
+// Manually trigger the full daily report (all risk levels)
+alertsRouter.post("/daily-report", async (_req, res) => {
+  try {
+    const result = await sendDailyRiskReport();
     res.json(result);
   } catch (e: any) {
     res.status(500).json({ ok: false, error: e.message });
@@ -45,9 +72,7 @@ alertsRouter.get("/status", async (_req, res) => {
       [config.latitude, config.longitude],
     );
 
-    const highRisk = rows.filter((r) =>
-      ["High", "Extreme"].includes(r.risk_label),
-    );
+    const highRisk = rows.filter((r) => ["High", "Extreme"].includes(r.risk_label));
 
     res.json({
       ok:           true,
@@ -106,7 +131,7 @@ alertsRouter.get("/history", async (req, res) => {
 alertsRouter.post("/test-email", async (_req, res) => {
   try {
     await sendEmailAlert(
-      " Test Email — Wildfire Alert System",
+      "🧪 Test Email — Wildfire Alert System",
       [
         "This is a test email from your Wildfire Risk Monitoring System.",
         "",
@@ -130,15 +155,68 @@ alertsRouter.post("/test-email", async (_req, res) => {
   }
 });
 
+// ── POST /api/alerts/test-extreme ─────────────────────────────────────────
+// Send a fake Extreme-risk alert email for testing purposes
+alertsRouter.post("/test-extreme", async (_req, res) => {
+  try {
+    const { buildFireAlertHtml, buildFireAlertText, sendFireAlert } = await import("../services/email.service");
+
+    const mockDays = [
+      {
+        date: new Date().toISOString().slice(0, 10),
+        risk_label: "Extreme",
+        risk_probability: 0.94,
+      },
+      {
+        date: new Date(Date.now() + 86400000).toISOString().slice(0, 10),
+        risk_label: "Extreme",
+        risk_probability: 0.88,
+      },
+    ];
+
+    const emailArgs = {
+      location:  config.locationKey,
+      latitude:  config.latitude,
+      longitude: config.longitude,
+      threshold: "Extreme" as const,
+      highDays:  mockDays,
+    };
+
+    const result = await sendFireAlert({
+      subject: `🔴 [TEST] EXTREME Fire Risk Alert — ${config.locationKey}`,
+      html:    buildFireAlertHtml(emailArgs),
+      text:    buildFireAlertText(emailArgs),
+    });
+
+    res.json({
+      ok:      true,
+      message: "Test EXTREME alert email sent.",
+      ...result,
+    });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ── POST /api/alerts/test-daily-report ────────────────────────────────────
+// Send a test daily report email right now
+alertsRouter.post("/test-daily-report", async (_req, res) => {
+  try {
+    const result = await sendDailyRiskReport();
+    res.json({ ok: true, message: "Test daily report sent.", ...result });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ── POST /api/alerts/iot-fire ─────────────────────────────────────────────
-// Called directly when IoT sensor detects fire/extreme smoke
 alertsRouter.post("/iot-fire", async (req, res) => {
   try {
     const {
-      deviceId   = "unknown",
-      deviceName = "IoT Sensor",
-      location   = config.locationKey,
-      smokePpm   = 0,
+      deviceId    = "unknown",
+      deviceName  = "IoT Sensor",
+      location    = config.locationKey,
+      smokePpm    = 0,
       temperature = 0,
       fireDetected = false,
     } = req.body ?? {};
@@ -147,8 +225,8 @@ alertsRouter.post("/iot-fire", async (req, res) => {
       deviceId,
       deviceName,
       location,
-      smokePpm:    Number(smokePpm),
-      temperature: Number(temperature),
+      smokePpm:     Number(smokePpm),
+      temperature:  Number(temperature),
       fireDetected: Boolean(fireDetected),
     });
 

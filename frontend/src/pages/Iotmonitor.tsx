@@ -76,11 +76,12 @@ function smokeLabel(ppm: number) {
 function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean; setCollapsed: (v: boolean) => void }) {
   const loc = useLocation();
   const links = [
-    { to: "/home",     icon: <LayoutDashboard size={18} />, label: "Dashboard" },
-    { to: "/forecast", icon: <CalendarDays size={18} />,    label: "Forecast" },
-    { to: "/iot",      icon: <Wifi size={18} />,            label: "IoT Monitor" },
-    { to: "/",         icon: <Activity size={18} />,        label: "Home" },
-  ];
+  { to: "/home",     icon: <LayoutDashboard size={18} />, label: "Dashboard"   },
+  { to: "/forecast", icon: <CalendarDays size={18} />,    label: "Forecast"    },
+  { to: "/iot",      icon: <Wifi size={18} />,            label: "IoT Monitor" },
+  { to: "/alerts",   icon: <Bell size={18} />,            label: "Alerts"      },
+  { to: "/",         icon: <Activity size={18} />,        label: "Home"        },
+];
   return (
     <aside style={{ width: collapsed ? 68 : 220, minHeight: "100vh", flexShrink: 0, background: "rgba(8,22,18,0.85)", backdropFilter: "blur(20px)", borderRight: "1px solid rgba(255,255,255,0.07)", display: "flex", flexDirection: "column", transition: "width 0.3s ease", overflow: "hidden", position: "sticky", top: 0, alignSelf: "flex-start" }}>
       <div style={{ padding: "20px 16px 16px", display: "flex", alignItems: "center", gap: 12, borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
@@ -147,6 +148,7 @@ export default function IoTMonitor() {
     try {
       // Try to fetch from /api/sensor/readings endpoint
       const sensorRes = await fetch(`${API}/api/sensor/readings?limit=50`);
+      console.log('sensor', sensorRes)
       if (sensorRes.ok) {
         const data = await sensorRes.json();
         const raw: SensorReading[] = data.data || data.readings || [];
@@ -171,7 +173,8 @@ export default function IoTMonitor() {
             location:    `Zone ${String.fromCharCode(65 + idx)}`,
             lat:         28.002 + idx * 0.01,
             lng:         83.036 + idx * 0.01,
-            online:      (Date.now() - new Date(latest.recorded_at).getTime()) < 30 * 60 * 1000,
+            // online:      (Date.now() - new Date(latest.recorded_at).getTime()) < 30 * 60 * 1000,
+            online:      true,
             battery:     100 - (idx * 11) % 70,
             lastSeen:    latest.recorded_at,
             temperature: latest.temperature,
@@ -251,6 +254,7 @@ export default function IoTMonitor() {
   }, []);
 
   const onlineCount  = devices.filter(d => d.online).length;
+  console.log(devices); 
   const alertCount   = devices.filter(d => d.fireDetected || d.smokeAlert).length;
   const fireCount    = devices.filter(d => d.fireDetected).length;
   const selectedDev  = devices.find(d => d.id === selectedDevice) ?? devices[0] ?? null;
@@ -558,6 +562,6 @@ function getDemoDevices(): IoTDevice[] {
     { id: "DEMO-001", name: "Sensor Node 1", location: "Zone A — East Forest", lat: 28.002, lng: 83.036, online: true,  battery: 87, lastSeen: new Date().toISOString(), temperature: 34.5, humidity: 42, smoke: 18,  co2: 412, heatIndex: 37.2, windSpeed: 12.3, fireDetected: false, smokeAlert: false, alertSent: false },
     { id: "DEMO-002", name: "Sensor Node 2", location: "Zone B — North Ridge",  lat: 28.013, lng: 83.047, online: true,  battery: 54, lastSeen: new Date().toISOString(), temperature: 38.1, humidity: 28, smoke: 180, co2: 510, heatIndex: 41.5, windSpeed: 19.8, fireDetected: false, smokeAlert: true,  alertSent: false },
     { id: "DEMO-003", name: "Sensor Node 3", location: "Zone C — West Buffer",  lat: 28.021, lng: 83.025, online: true,  battery: 22, lastSeen: new Date().toISOString(), temperature: 41.7, humidity: 19, smoke: 340, co2: 780, heatIndex: 46.3, windSpeed: 25.1, fireDetected: true,  smokeAlert: false, alertSent: false },
-    { id: "DEMO-004", name: "Sensor Node 4", location: "Zone D — South Perimeter", lat: 27.994, lng: 83.042, online: false, battery: 8,  lastSeen: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), temperature: 29.3, humidity: 58, smoke: 22,  co2: 395, heatIndex: 30.1, windSpeed: 7.2,  fireDetected: false, smokeAlert: false, alertSent: false },
+    { id: "DEMO-004", name: "Sensor Node 4", location: "Zone D — South Perimeter", lat: 27.994, lng: 83.042, online: true, battery: 8,  lastSeen: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), temperature: 29.3, humidity: 58, smoke: 22,  co2: 395, heatIndex: 30.1, windSpeed: 7.2,  fireDetected: false, smokeAlert: false, alertSent: false },
   ];
 }

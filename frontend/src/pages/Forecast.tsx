@@ -35,11 +35,12 @@ function RiskBar({ pct, color }: { pct: number; color: string }) {
 function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean; setCollapsed: (v: boolean) => void }) {
   const loc = useLocation();
   const links = [
-    { to: "/home",     icon: <LayoutDashboard size={18} />, label: "Dashboard" },
-    { to: "/forecast", icon: <CalendarDays size={18} />,    label: "Forecast" },
-    { to: "/iot",      icon: <Wifi size={18} />,            label: "IoT Monitor" },
-    { to: "/",         icon: <Activity size={18} />,        label: "Home" },
-  ];
+  { to: "/home",     icon: <LayoutDashboard size={18} />, label: "Dashboard"   },
+  { to: "/forecast", icon: <CalendarDays size={18} />,    label: "Forecast"    },
+  { to: "/iot",      icon: <Wifi size={18} />,            label: "IoT Monitor" },
+  { to: "/alerts",   icon: <Bell size={18} />,            label: "Alerts"      },
+  { to: "/",         icon: <Activity size={18} />,        label: "Home"        },
+];
   return (
     <aside style={{ width: collapsed ? 68 : 220, minHeight: "100vh", flexShrink: 0, background: "rgba(8,22,18,0.85)", backdropFilter: "blur(20px)", borderRight: "1px solid rgba(255,255,255,0.07)", display: "flex", flexDirection: "column", transition: "width 0.3s ease", overflow: "hidden", position: "sticky", top: 0, alignSelf: "flex-start" }}>
       <div style={{ padding: "20px 16px 16px", display: "flex", alignItems: "center", gap: 12, borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
