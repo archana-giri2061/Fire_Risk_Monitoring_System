@@ -2,9 +2,8 @@ import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   CalendarDays, AlertTriangle, CheckCircle, RefreshCw,
-  MapPin, Clock, Bell, TrendingUp, ChevronDown, ChevronUp,
+  MapPin, Clock, Bell,  ChevronDown, ChevronUp,
   Activity, LayoutDashboard, Menu, X, Wifi, Flame,
-  Thermometer, Droplets, Wind,
 } from "lucide-react";
 import logo from "../assets/logo.png";
 

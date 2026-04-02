@@ -251,6 +251,7 @@ export default function IoTMonitor() {
     fetchDevices();
     const interval = setInterval(fetchDevices, 30_000); // poll every 30s
     return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const onlineCount  = devices.filter(d => d.online).length;

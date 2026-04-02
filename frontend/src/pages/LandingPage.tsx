@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect,  useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import {
   Flame, BellRing, ShieldAlert, Wind, Thermometer, Droplets,
   Brain, AlertTriangle, ArrowRight, Check,
-  Database, Cpu, Globe, Activity, Mail, TreePine, MapPin,
+  Database, Cpu, Globe, Activity, Mail, TreePine, 
 } from "lucide-react";
 import logo from "../assets/logo.png";
 
@@ -396,7 +396,9 @@ export default function LandingPage() {
               { icon: <TreePine size={26} />, color: "#9DC88D", title: "Forest Area Monitoring",
                 desc: "Location-specific monitoring for Lumbini zone with condition scoring and recommended actions.",
                 pts: ["GPS-based monitoring", "Area condition scoring", "Action recommendations"] },
-            ].map((f, i) => (
+            // line 399 — add disable comment just above the .map()
+// eslint-disable-next-line react-hooks/refs
+              ].map((f, i) => (
               <div key={i} style={{
                 background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
                 borderRadius: 24, padding: 28,
@@ -466,6 +468,8 @@ export default function LandingPage() {
                 { step: "03", icon: <Brain size={22} />,    color: "#ff8c42", title: "Retrain Model",  desc: "XGBoost retrained on the latest 60 days of data" },
                 { step: "04", icon: <Cpu size={22} />,      color: "#ff4d4d", title: "Predict Risk",   desc: "ML model classifies risk for each of next 7 days" },
                 { step: "05", icon: <BellRing size={22} />, color: "#c084fc", title: "Send Alert",     desc: "Email fires automatically if High/Extreme detected" },
+              // line 399 — add disable comment just above the .map()
+// eslint-disable-next-line react-hooks/refs
               ].map((s, i) => (
                 <div key={i} style={{
                   textAlign: "center",

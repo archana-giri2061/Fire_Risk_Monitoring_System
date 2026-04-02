@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
-  Flame, Thermometer, Droplets, Wind, CloudRain,
+   Thermometer, Droplets, Wind, CloudRain,
   Bell, Activity, TrendingUp, TrendingDown,
   RefreshCw, AlertTriangle, CheckCircle, Database,
   MapPin, Clock, Cpu, TreePine, LayoutDashboard, BarChart2,

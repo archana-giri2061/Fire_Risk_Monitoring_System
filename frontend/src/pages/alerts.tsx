@@ -4,7 +4,7 @@ import {
   Bell, BellOff, BellRing, CheckCircle, AlertTriangle,
   RefreshCw, Send, Mail, Flame, Clock, MapPin,
   LayoutDashboard, CalendarDays, Wifi, Activity,
-  Menu, X, Zap, Shield, FileText, ChevronDown, ChevronUp,
+  Menu, X, Zap, Shield,  ChevronDown, ChevronUp,
   Volume2, VolumeX,
 } from "lucide-react";
 import logo from "../assets/logo.png";
@@ -38,6 +38,7 @@ interface Prediction {
 
 // ── Sound engine ───────────────────────────────────────────────────────────
 function createAudioCtx(): AudioContext | null {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   try { return new (window.AudioContext || (window as any).webkitAudioContext)(); }
   catch { return null; }
 }
@@ -153,7 +154,7 @@ export default function Alerts() {
     } catch { addToast("Failed to fetch — check backend", "error"); }
     finally { setLoading(false); }
   };
-
+// eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchData(); }, []);
 
   const sendAlert = async (minRisk: "High" | "Extreme", label: string) => {

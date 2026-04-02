@@ -17,6 +17,7 @@ type RiskLevel = "Low" | "Moderate" | "High" | "Extreme";
 // ── Web Audio API tone generator ────────────────────────────────────────────
 function createAudioContext(): AudioContext | null {
   try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return new (window.AudioContext || (window as any).webkitAudioContext)();
   } catch {
     return null;
