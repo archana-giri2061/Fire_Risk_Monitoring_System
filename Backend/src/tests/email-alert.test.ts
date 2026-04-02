@@ -75,11 +75,11 @@ function section(title: string) {
 async function testSmtpConfig() {
   section("1 · SMTP Config Check");
 
-  const { host, user, pass, to } = config.smtp;
+  const { host, user, pass : smtpPass, to } = config.smtp;
   const missing: string[] = [];
   if (!host) missing.push("SMTP_HOST");
   if (!user) missing.push("SMTP_USER");
-  if (!pass) missing.push("SMTP_PASS");
+  if (!smtpPass) missing.push("SMTP_PASS");
   if (!to)   missing.push("ALERT_TO_EMAIL");
 
   if (missing.length) {
