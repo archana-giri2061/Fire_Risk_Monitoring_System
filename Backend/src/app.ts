@@ -71,15 +71,19 @@ async function runFullPipeline(label: string): Promise<void> {
   console.log(`\n [${label}] Pipeline completed\n${"─".repeat(50)}\n`);
 }
 
-async function startupPipeline(attempt = 1): Promise<void> {
-  try {
-    await runFullPipeline("Startup");
-  } catch (error: any) {
-    if (attempt < 5) {
-      const waitSecs = attempt * 10;
-      setTimeout(() => startupPipeline(attempt + 1), waitSecs * 1000);
+async function startupPipeline(attempt = 1) {
+    try {
+        await runFullPipeline("Startup");
+    } catch (error) {
+        console.error(` [Startup] Attempt ${attempt} failed:`, error?.message);
+        if (attempt < 5) {
+            const waitSecs = attempt * 10;
+            console.log(` [Startup] Retrying in ${waitSecs}s...`);
+            setTimeout(() => startupPipeline(attempt + 1), waitSecs * 1000);
+        } else {
+            console.error(" [Startup] All retries exhausted. Server continues without pipeline.");
+        }
     }
-  }
 }
 
 // ── Daily 10:35 AM Report Scheduler ───────────────────────────────────────
@@ -116,7 +120,14 @@ function scheduleDailyReport(): void {
 app.listen(config.port, "0.0.0.0", () => {
   console.log(` Server running at http://0.0.0.0:${config.port}`);
 
-  if (config.syncOnStart) setTimeout(() => startupPipeline(), 3000);
+  if (config.syncOnStart) {
+        // Delay pipeline start by 15s so Render's health check passes first
+        setTimeout(() => {
+            startupPipeline().catch((err) => {
+                console.error(" [Startup] Pipeline error (non-fatal):", err?.message);
+            });
+        }, 15000);
+    }
 
   const intervalMs = config.syncIntervalMinutes * 60 * 1000;
   console.log(` Pipeline scheduled every ${config.syncIntervalMinutes} minutes`);
