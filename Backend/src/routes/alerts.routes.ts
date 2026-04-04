@@ -1,7 +1,12 @@
 import { Router } from "express";
 import { config } from "../config";
 import { runRiskEmailAlerts, sendIoTFireAlert } from "../services/alertEngine.service";
-import { sendEmailAlert } from "../services/email.service";
+import { 
+  sendEmailAlert, 
+  buildFireAlertHtml, 
+  buildFireAlertText, 
+  sendFireAlert 
+} from "../services/email.service";
 import { sendDailyRiskReport } from "../services/dailyReport.service";
 import { pool } from "../db";
 
@@ -155,11 +160,11 @@ alertsRouter.post("/test-email", async (_req, res) => {
   }
 });
 
-// ── POST /api/alerts/test-extreme ─────────────────────────────────────────
-// Send a fake Extreme-risk alert email for testing purposes
+/// ── POST /api/alerts/test-extreme ─────────────────────────────────────────
 alertsRouter.post("/test-extreme", async (_req, res) => {
   try {
-    const { buildFireAlertHtml, buildFireAlertText, sendFireAlert } = await import("../services/email.service");
+    // ❌ Remove this dynamic import line entirely
+    // const { buildFireAlertHtml, buildFireAlertText, sendFireAlert } = await import("../services/email.service");
 
     const mockDays = [
       {
