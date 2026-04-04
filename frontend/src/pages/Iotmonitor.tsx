@@ -8,7 +8,7 @@ import {
   WifiOff, Zap,
 } from "lucide-react";
 import logo from "../assets/logo.png";
-import { API_BASE_URL as API } from "../api/config";
+const API = "https://fire-risk-monitoring-system-1.onrender.com";
 
 interface IoTDevice {
   id: string; name: string; location: string; lat: number; lng: number;

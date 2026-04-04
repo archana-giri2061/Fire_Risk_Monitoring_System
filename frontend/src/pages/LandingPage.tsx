@@ -577,7 +577,7 @@ export default function LandingPage() {
                     display: "flex", alignItems: "center", gap: 10, padding: "12px 16px",
                     borderRadius: 12, background: "rgba(255,255,255,0.04)",
                     border: "1px solid rgba(255,255,255,0.08)", flexWrap: "wrap",
-                    }}>
+                }}>
                     <RiskBadge level={item.level} />
                     <span style={{ fontSize: 13, color: "rgba(255,255,255,0.58)" }}>{item.action}</span>
                   </div>
