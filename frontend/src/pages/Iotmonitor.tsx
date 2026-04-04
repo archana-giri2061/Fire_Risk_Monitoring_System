@@ -141,7 +141,7 @@ export default function IoTMonitor() {
           const smoke  = latest.smoke_ppm ?? 0;
           const co2    = latest.co2_ppm   ?? 400;
           const fireDetected = latest.fire_detected ?? (smoke > 300);
-          return { id, name: `Sensor Node ${idx + 1}`, location: `Zone ${String.fromCharCode(65 + idx)}`, lat: 28.002 + idx * 0.01, lng: 83.036 + idx * 0.01, online: true, battery: 100 - (idx * 11) % 70, lastSeen: latest.recorded_at, temperature: latest.temperature, humidity: latest.humidity, smoke, co2, heatIndex: latest.heat_index ?? latest.temperature + 2, windSpeed: latest.wind_speed ?? 0, fireDetected, smokeAlert: smoke > 150 && !fireDetected, alertSent: alertedRef.current.has(id) };
+          return { id, name: `Sensor Node ${idx + 1}`, location: `Zone ${String.fromCharCode(65 + idx)}`, lat: 28.002 + idx * 0.01, lng: 83.036 + idx * 0.01, online: true, battery: 100 - (idx * 11) % 70, lastSeen: latest.measured_at, temperature: latest.temperature, humidity: latest.humidity, smoke, co2, heatIndex: latest.heat_index ?? latest.temperature + 2, windSpeed: latest.wind_speed ?? 0, fireDetected, smokeAlert: smoke > 150 && !fireDetected, alertSent: alertedRef.current.has(id) };
         });
         setDevices(deviceList);
         const fireDevices = deviceList.filter(d => d.fireDetected && !alertedRef.current.has(d.id));
