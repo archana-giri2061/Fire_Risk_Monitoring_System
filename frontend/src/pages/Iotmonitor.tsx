@@ -8,8 +8,7 @@ import {
   WifiOff, Zap,
 } from "lucide-react";
 import logo from "../assets/logo.png";
-
-const API = "http://localhost:3000";
+import { API_BASE_URL as API } from "../api/config";
 
 interface IoTDevice {
   id: string; name: string; location: string; lat: number; lng: number;

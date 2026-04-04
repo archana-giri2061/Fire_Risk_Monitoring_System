@@ -24,7 +24,7 @@ interface Area   { area: string; avgTemperature: number; avgHumidity: number; av
 interface DashboardData { overview: Overview; trends: Trend[]; readings: Reading[]; alerts: Alert[]; areas: Area[]; }
 interface Prediction { date: string; risk_code: number; risk_label: string; risk_probability: number; model_name: string; }
 
-const API = "http://localhost:3000";
+import { API_BASE_URL as API } from "../api/config";
 
 const RISK_COLOR: Record<string, string> = { Low: "#9DC88D", Moderate: "#F1B24A", High: "#ff8c42", Extreme: "#ff4d4d" };
 const RISK_BG:    Record<string, string> = { Low: "rgba(157,200,141,0.18)", Moderate: "rgba(241,178,74,0.18)", High: "rgba(255,140,66,0.18)", Extreme: "rgba(255,77,77,0.18)" };

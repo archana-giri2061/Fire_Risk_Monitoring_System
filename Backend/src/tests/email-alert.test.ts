@@ -369,7 +369,7 @@ async function testRunRiskEmailAlerts_High() {
 //  API ENDPOINT TESTS  (requires server running on localhost:3000)
 // ══════════════════════════════════════════════════════════════════════════
 
-const BASE = `http://localhost:${config.port}`;
+const BASE = process.env.API_BASE_URL || "http://localhost:5000";
 
 async function apiPost(path: string, body: object = {}): Promise<any> {
   const res = await fetch(`${BASE}${path}`, {
