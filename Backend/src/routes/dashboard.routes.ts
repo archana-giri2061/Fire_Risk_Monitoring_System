@@ -1,10 +1,10 @@
-import { Router } from "express";
+import { Router, Request, Response } from "express";
 import { pool } from "../db";
 import { config } from "../config";
 
 export const dashboardRouter = Router();
 
-function toNumber(value: any, fallback = 0) {
+function toNumber(value: any, fallback = 0): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 }
@@ -14,20 +14,14 @@ function getCondition(
   humidity: number,
   windSpeed: number,
   rainfall: number
-) {
-  if (temperature >= 32 && humidity <= 40 && windSpeed >= 18) {
-    return "Critical Watch";
-  }
-  if (humidity <= 45 && rainfall <= 1) {
-    return "Dry Conditions";
-  }
-  if (windSpeed >= 20) {
-    return "Wind Alert";
-  }
+): string {
+  if (temperature >= 32 && humidity <= 40 && windSpeed >= 18) return "Critical Watch";
+  if (humidity <= 45 && rainfall <= 1) return "Dry Conditions";
+  if (windSpeed >= 20) return "Wind Alert";
   return "Stable";
 }
 
-function getAction(condition: string) {
+function getAction(condition: string): string {
   switch (condition) {
     case "Critical Watch":
       return "Immediate monitoring required";
@@ -40,12 +34,11 @@ function getAction(condition: string) {
   }
 }
 
-function getSeverity(condition: string) {
+function getSeverity(condition: string): string {
   switch (condition) {
     case "Critical Watch":
       return "High";
     case "Dry Conditions":
-      return "Medium";
     case "Wind Alert":
       return "Medium";
     default:
@@ -53,10 +46,11 @@ function getSeverity(condition: string) {
   }
 }
 
-dashboardRouter.get("/home", async (_req, res) => {
+dashboardRouter.get("/home", async (_req: Request, res: Response) => {
   try {
     console.log("/api/dashboard/home route hit");
 
+    // Fetch latest archive data
     const archiveResult = await pool.query(
       `
       SELECT
@@ -103,7 +97,8 @@ dashboardRouter.get("/home", async (_req, res) => {
     const latest = latestRows[0];
     const trendRows = [...latestRows].reverse();
 
-    let sensorRows: any[] = [];
+    // Fetch latest sensor data
+    let sensorRows: { sensor_type: string; value: number; measured_at: string }[] = [];
     try {
       const sensorResult = await pool.query(
         `
@@ -118,33 +113,27 @@ dashboardRouter.get("/home", async (_req, res) => {
       sensorRows = sensorResult.rows;
     } catch (sensorError: any) {
       console.warn("⚠ sensor query skipped:", sensorError.message);
-      sensorRows = [];
     }
 
+    // Map sensor values
     const sensorMap: Record<string, number> = {};
     for (const row of sensorRows) {
-      sensorMap[String(row.sensor_type).toLowerCase()] = toNumber(row.value);
+      sensorMap[row.sensor_type.toLowerCase()] = toNumber(row.value);
     }
 
-    const temperature =
-      sensorMap["temperature"] ?? toNumber(latest.temp_mean);
-    const humidity =
-      sensorMap["humidity"] ?? toNumber(latest.humidity_mean);
+    const temperature = sensorMap["temperature"] ?? toNumber(latest.temp_mean);
+    const humidity = sensorMap["humidity"] ?? toNumber(latest.humidity_mean);
     const windSpeed =
-      sensorMap["wind"] ??
-      sensorMap["wind_speed"] ??
-      toNumber(latest.wind_speed_max);
+      sensorMap["wind"] ?? sensorMap["wind_speed"] ?? toNumber(latest.wind_speed_max);
     const rainfall =
-      sensorMap["rainfall"] ??
-      sensorMap["precipitation"] ??
-      toNumber(latest.precipitation_sum);
+      sensorMap["rainfall"] ?? sensorMap["precipitation"] ?? toNumber(latest.precipitation_sum);
 
+    // Prepare readings
     const readings = latestRows.map((row) => {
       const t = toNumber(row.temp_mean);
       const h = toNumber(row.humidity_mean);
       const w = toNumber(row.wind_speed_max);
       const r = toNumber(row.precipitation_sum);
-
       return {
         time: String(row.date),
         location: row.location_key,
@@ -157,6 +146,7 @@ dashboardRouter.get("/home", async (_req, res) => {
       };
     });
 
+    // Prepare trends
     const trends = trendRows.map((row) => ({
       time: String(row.date),
       temperature: toNumber(row.temp_mean),
@@ -164,12 +154,7 @@ dashboardRouter.get("/home", async (_req, res) => {
       windSpeed: toNumber(row.wind_speed_max),
     }));
 
-    const latestCondition = getCondition(
-      temperature,
-      humidity,
-      windSpeed,
-      rainfall
-    );
+    const latestCondition = getCondition(temperature, humidity, windSpeed, rainfall);
 
     const areas = [
       {
@@ -208,8 +193,7 @@ dashboardRouter.get("/home", async (_req, res) => {
         lastUpdated: latest.updated_at
           ? new Date(latest.updated_at).toLocaleString()
           : String(latest.date),
-        dataSource:
-          sensorRows.length > 0 ? "Database + Sensor Readings" : "Database",
+        dataSource: sensorRows.length > 0 ? "Database + Sensor Readings" : "Database",
         temperature,
         humidity,
         windSpeed,
