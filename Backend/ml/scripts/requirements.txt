@@ -1,0 +1,12 @@
+joblib
+pandas
+scikit-learn
+xgboost
+sqlalchemy
+openpyxl
+fastapi
+uvicorn[standard]
+pydantic
+asyncpg
+httpx
+python-dotenv
