@@ -18,7 +18,7 @@ interface IoTDevice {
   smokeAlert: boolean; alertSent: boolean;
 }
 interface SensorReading {
-  device_id: string; recorded_at: string; temperature: number; humidity: number;
+  device_id: string; measured_at: string; temperature: number; humidity: number;
   smoke_ppm?: number; co2_ppm?: number; heat_index?: number;
   wind_speed?: number; fire_detected?: boolean;
 }
@@ -129,7 +129,7 @@ export default function IoTMonitor() {
 
   const fetchDevices = async () => {
     try {
-      const sensorRes = await fetch(`${API}/api/sensor/readings?limit=50`);
+      const sensorRes = await fetch(`${API}/api/sensor/all?limit=50`);
       if (sensorRes.ok) {
         const data = await sensorRes.json();
         const raw: SensorReading[] = data.data || data.readings || [];
@@ -454,7 +454,7 @@ export default function IoTMonitor() {
                       const fireColor = r.fire_detected ? "#ff4d4d" : smoke > 150 ? "#ff8c42" : "#9DC88D";
                       return (
                         <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-                          <td style={{ padding: "9px 10px", fontSize: 11, color: "rgba(255,255,255,0.5)" }}>{new Date(r.recorded_at).toLocaleTimeString()}</td>
+                          <td style={{ padding: "9px 10px", fontSize: 11, color: "rgba(255,255,255,0.5)" }}>{new Date(r.measured_at).toLocaleTimeString()}</td>
                           <td style={{ padding: "9px 10px", fontSize: 11, color: "rgba(255,255,255,0.7)", fontWeight: 600 }}>{r.device_id}</td>
                           <td style={{ padding: "9px 10px", fontSize: 12, fontWeight: 700, color: "#ff8c42" }}>{r.temperature?.toFixed(1)}°C</td>
                           <td style={{ padding: "9px 10px", fontSize: 12, color: "#60a5fa" }}>{r.humidity?.toFixed(0)}%</td>

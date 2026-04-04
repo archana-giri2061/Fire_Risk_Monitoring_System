@@ -235,3 +235,17 @@ alertsRouter.post("/iot-fire", async (req, res) => {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
+// ── POST /api/alerts/test-extreme ─────────────────────────────────────────
+alertsRouter.post("/test-extreme", async (_req, res) => {
+  try {
+    const result = await runRiskEmailAlerts({
+      latitude:     config.latitude,
+      longitude:    config.longitude,
+      location_key: config.locationKey,
+      minRisk:      "Extreme",
+    });
+    res.json({ ok: true, message: "Test extreme alert triggered.", ...result });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});

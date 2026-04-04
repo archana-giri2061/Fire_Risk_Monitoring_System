@@ -115,3 +115,21 @@ sensorRouter.get("/latest/:deviceId", async (req, res) => {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
+// Add this after the /all route
+sensorRouter.get("/readings", async (req, res) => {
+  try {
+    const limit = Number(req.query.limit ?? 50);
+
+    const { rows } = await pool.query(
+      `SELECT id, device_id, sensor_id, sensor_type, value, unit, measured_at, seq
+       FROM iot_sensor_readings
+       ORDER BY measured_at DESC
+       LIMIT $1`,
+      [limit]
+    );
+
+    res.json({ ok: true, count: rows.length, data: rows });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
