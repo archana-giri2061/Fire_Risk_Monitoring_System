@@ -8,30 +8,30 @@ import {
   Menu, X, Wifi, CalendarDays,
 } from "lucide-react";
 import logo from "../assets/logo.png";
-// ── Import API URL from central config ────────────────────────────────────
 import { API } from "../api";
 
+// ── Types ──────────────────────────────────────────────────────────────────
 interface Overview {
   monitoringStatus: string; lastUpdated: string; dataSource: string;
   temperature: number; humidity: number; windSpeed: number;
   rainfall: number; pressure: number; activeAlerts: number;
+  riskLabel?: string; riskProbability?: number;
 }
-interface Trend  { time: string; temperature: number; humidity: number; windSpeed: number; }
+interface Prediction { date: string; risk_code: number; risk_label: string; risk_probability: number; model_name?: string; }
+interface Trend   { time: string; temperature: number; humidity: number; windSpeed: number; }
 interface Reading { time: string; location: string; temperature: number; humidity: number; windSpeed: number; rainfall: number; pressure: number; status: string; }
-interface Alert  { time: string; type: string; location: string; severity: string; message: string; }
-interface Area   { area: string; avgTemperature: number; avgHumidity: number; avgWindSpeed: number; condition: string; action: string; lat: number; lng: number; }
-interface DashboardData { overview: Overview; trends: Trend[]; readings: Reading[]; alerts: Alert[]; areas: Area[]; }
-interface Prediction { date: string; risk_code: number; risk_label: string; risk_probability: number; model_name: string; }
+interface Alert   { time: string; type: string; location: string; severity: string; message: string; }
+interface Area    { area: string; avgTemperature: number; avgHumidity: number; avgWindSpeed: number; condition: string; action: string; lat: number; lng: number; }
+interface DashboardData { overview: Overview; predictions?: Prediction[]; trends: Trend[]; readings: Reading[]; alerts: Alert[]; areas: Area[]; }
 
-const RISK_COLOR: Record<string, string> = { Low: "#9DC88D", Moderate: "#F1B24A", High: "#ff8c42", Extreme: "#ff4d4d" };
+const RISK_COLOR: Record<string, string> = { Low: "#9DC88D", Moderate: "#F1B24A", High: "#ff8c42", Extreme: "#ff4d4d", Unknown: "#888" };
 const RISK_BG:    Record<string, string> = { Low: "rgba(157,200,141,0.18)", Moderate: "rgba(241,178,74,0.18)", High: "rgba(255,140,66,0.18)", Extreme: "rgba(255,77,77,0.18)" };
-const RISK_ICON:  Record<string, string> = { Low: "🟢", Moderate: "🟡", High: "🟠", Extreme: "🔴" };
-
+const RISK_ICON:  Record<string, string> = { Low: "🟢", Moderate: "🟡", High: "🟠", Extreme: "🔴", Unknown: "⚪" };
 
 function useIsMobile() {
-  const [mobile, setMobile] = useState(window.innerWidth < 768);
-  useEffect(() => { const fn = () => setMobile(window.innerWidth < 768); window.addEventListener("resize", fn); return () => window.removeEventListener("resize", fn); }, []);
-  return mobile;
+  const [m, setM] = useState(window.innerWidth < 768);
+  useEffect(() => { const fn = () => setM(window.innerWidth < 768); window.addEventListener("resize", fn); return () => window.removeEventListener("resize", fn); }, []);
+  return m;
 }
 
 function RiskBar({ pct, color }: { pct: number; color: string }) {
@@ -49,6 +49,7 @@ function SparkBar({ values, color }: { values: number[]; color: string }) {
   );
 }
 
+// ── Sidebar ────────────────────────────────────────────────────────────────
 export function Sidebar({ collapsed, setCollapsed, mobileOpen, setMobileOpen }: { collapsed: boolean; setCollapsed: (v: boolean) => void; mobileOpen?: boolean; setMobileOpen?: (v: boolean) => void }) {
   const loc = useLocation();
   const isMobile = useIsMobile();
@@ -108,6 +109,7 @@ function StatCard({ icon, label, value, unit, color, sub, trend }: { icon: React
   );
 }
 
+// ── Main Dashboard ─────────────────────────────────────────────────────────
 export default function Dashboard() {
   const [data, setData]             = useState<DashboardData | null>(null);
   const [preds, setPreds]           = useState<Prediction[]>([]);
@@ -126,17 +128,27 @@ export default function Dashboard() {
         fetch(`${API}/api/dashboard/home`),
         fetch(`${API}/api/ml/predictions?limit=7`),
       ]);
+
       if (dashRes.ok) {
-        const d = await dashRes.json();
+        const d: DashboardData = await dashRes.json();
         setData(d);
+        // Use predictions from dashboard if available, else separate call
+        if (d.predictions?.length) setPreds(d.predictions);
         setLastSync(d.overview?.lastUpdated || new Date().toLocaleString());
       } else {
-        setError(`Dashboard error: ${dashRes.status} ${dashRes.statusText}`);
+        const errBody = await dashRes.text().catch(() => "");
+        setError(`Dashboard API error ${dashRes.status}: ${errBody.slice(0, 120)}`);
       }
-      if (predRes.ok) { const p = await predRes.json(); setPreds(p.data || []); }
+
+      if (predRes.ok) {
+        const p = await predRes.json();
+        if (p.data?.length) setPreds(p.data);
+      }
     } catch {
-      setError(`Cannot reach backend at ${API}. Check your VITE_API_URL env variable.`);
-    } finally { setLoading(false); }
+      setError(`Cannot reach backend at ${API}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSync = async () => {
@@ -148,29 +160,41 @@ export default function Dashboard() {
     finally { setSyncing(false); }
   };
 
+  const runAction = async (endpoint: string) => {
+    try {
+      await fetch(`${API}${endpoint}`, { method: "POST" });
+      await fetchAll();
+    } catch { /**/ }
+  };
+
   useEffect(() => { fetchAll(); }, []);
+
+  // ── Computed ──────────────────────────────────────────────────────────────
+  const ov         = data?.overview;
+  const worstPred  = preds.find(p => p.risk_label === "Extreme") || preds.find(p => p.risk_label === "High");
+  // Use riskLabel from overview (provided by fixed backend), fall back to preds
+  const riskLabel  = ov?.riskLabel || preds[0]?.risk_label || "Unknown";
+  const riskProb   = ov?.riskProbability ?? (preds[0] ? preds[0].risk_probability : 0);
+  const riskColor  = RISK_COLOR[riskLabel] ?? "#888";
 
   if (loading) return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
       {!isMobile && <Sidebar collapsed={collapsed} setCollapsed={setCollapsed} />}
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16 }}>
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 14 }}>
         <div style={{ width: 48, height: 48, borderRadius: "50%", border: "3px solid rgba(157,200,141,0.2)", borderTopColor: "#9DC88D", animation: "spin 0.9s linear infinite" }} />
         <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 14 }}>Loading dashboard…</div>
-        <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 12 }}>Connecting to {API}</div>
+        <div style={{ color: "rgba(255,255,255,0.25)", fontSize: 11 }}>{API}</div>
       </div>
       <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
     </div>
   );
-
-  const ov = data?.overview;
-  const worstPred = preds.find(p => p.risk_label === "Extreme") || preds.find(p => p.risk_label === "High");
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "transparent" }}>
       <Sidebar collapsed={collapsed} setCollapsed={setCollapsed} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        {/* Top bar */}
+        {/* ── Top bar ── */}
         <div style={{ padding: isMobile ? "12px 16px" : "14px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.07)", background: "rgba(8,22,18,0.6)", backdropFilter: "blur(14px)", position: "sticky", top: 0, zIndex: 10, gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {isMobile && <button onClick={() => setMobileOpen(true)} style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", padding: 4 }}><Menu size={22} /></button>}
@@ -182,43 +206,55 @@ export default function Dashboard() {
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {!isMobile && <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 999, background: "rgba(157,200,141,0.12)", border: "1px solid rgba(157,200,141,0.25)", color: "#9DC88D", fontSize: 12, fontWeight: 600 }}>
-              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#9DC88D", animation: "pulse 2s infinite" }} /> Live
-            </div>}
-            <button onClick={handleSync} disabled={syncing} style={{ display: "flex", alignItems: "center", gap: 6, padding: isMobile ? "8px 12px" : "8px 16px", borderRadius: 999, background: "rgba(241,178,74,0.15)", border: "1px solid rgba(241,178,74,0.3)", color: "#F1B24A", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+            {!isMobile && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 999, background: "rgba(157,200,141,0.12)", border: "1px solid rgba(157,200,141,0.25)", color: "#9DC88D", fontSize: 12, fontWeight: 600 }}>
+                <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#9DC88D", animation: "pulse 2s infinite" }} /> Live
+              </div>
+            )}
+            <button onClick={handleSync} disabled={syncing} style={{ display: "flex", alignItems: "center", gap: 6, padding: isMobile ? "8px 12px" : "8px 16px", borderRadius: 999, background: "rgba(241,178,74,0.15)", border: "1px solid rgba(241,178,74,0.3)", color: "#F1B24A", fontWeight: 700, fontSize: 13, cursor: syncing ? "not-allowed" : "pointer" }}>
               <RefreshCw size={13} style={{ animation: syncing ? "spin 1s linear infinite" : "none" }} />
               {!isMobile && (syncing ? "Syncing…" : "Sync Now")}
             </button>
           </div>
         </div>
 
-        <div style={{ flex: 1, padding: isMobile ? "16px" : "24px", display: "flex", flexDirection: "column", gap: isMobile ? 16 : 22, overflowY: "auto" }}>
+        <div style={{ flex: 1, padding: isMobile ? "16px" : "24px", display: "flex", flexDirection: "column", gap: isMobile ? 14 : 20, overflowY: "auto" }}>
 
+          {/* ── Error ── */}
           {error && (
             <div style={{ padding: "14px 18px", borderRadius: 14, display: "flex", alignItems: "flex-start", gap: 12, background: "rgba(255,77,77,0.12)", border: "1px solid rgba(255,77,77,0.3)", color: "#ff9999", fontSize: 13 }}>
               <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
               <div>
-                <div style={{ fontWeight: 700, marginBottom: 4 }}>Backend Connection Error</div>
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>Backend Error</div>
                 <div style={{ opacity: 0.8 }}>{error}</div>
-                <div style={{ marginTop: 8, opacity: 0.6, fontSize: 12 }}>API URL: <code style={{ background: "rgba(255,255,255,0.1)", padding: "1px 6px", borderRadius: 4 }}>{API}</code></div>
+                <div style={{ marginTop: 6, opacity: 0.5, fontSize: 11 }}>API: <code style={{ background: "rgba(255,255,255,0.1)", padding: "1px 5px", borderRadius: 3 }}>{API}</code></div>
               </div>
             </div>
           )}
 
+          {/* ── No data warning ── */}
+          {!error && preds.length === 0 && (
+            <div style={{ padding: "14px 18px", borderRadius: 14, display: "flex", alignItems: "center", gap: 12, background: "rgba(241,178,74,0.10)", border: "1px solid rgba(241,178,74,0.3)", color: "#F1B24A", fontSize: 13 }}>
+              <AlertTriangle size={16} />
+              <div>
+                <strong>No ML predictions yet.</strong> Click <strong>Quick Actions → Run ML Prediction</strong> to generate the 7-day forecast.
+              </div>
+            </div>
+          )}
+
+          {/* ── Risk banner ── */}
           {worstPred && (
-            <div style={{ padding: isMobile ? "14px 16px" : "14px 20px", borderRadius: 16, display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "space-between", background: `${RISK_BG[worstPred.risk_label]}`, border: `1px solid ${RISK_COLOR[worstPred.risk_label]}40`, gap: 12, flexDirection: isMobile ? "column" : "row" }}>
+            <div style={{ padding: isMobile ? "14px 16px" : "14px 20px", borderRadius: 16, display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "space-between", background: RISK_BG[worstPred.risk_label] ?? "rgba(255,140,66,0.18)", border: `1px solid ${RISK_COLOR[worstPred.risk_label] ?? "#ff8c42"}40`, gap: 12, flexDirection: isMobile ? "column" : "row" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <AlertTriangle size={16} color={RISK_COLOR[worstPred.risk_label]} />
-                <div>
-                  <span style={{ fontWeight: 700, color: RISK_COLOR[worstPred.risk_label] }}>{RISK_ICON[worstPred.risk_label]} {worstPred.risk_label} Risk</span>
-                  <span style={{ color: "rgba(255,255,255,0.55)", fontSize: 12, marginLeft: 8 }}>{worstPred.date} · {Math.round(worstPred.risk_probability * 100)}%</span>
-                </div>
+                <span style={{ fontWeight: 700, color: RISK_COLOR[worstPred.risk_label] }}>{RISK_ICON[worstPred.risk_label]} {worstPred.risk_label} Risk</span>
+                <span style={{ color: "rgba(255,255,255,0.55)", fontSize: 12 }}>on {worstPred.date} · {Math.round(worstPred.risk_probability * 100)}%</span>
               </div>
               <Link to="/forecast" style={{ padding: "7px 14px", borderRadius: 999, fontSize: 12, fontWeight: 700, textDecoration: "none", background: RISK_COLOR[worstPred.risk_label], color: "#1d241e", whiteSpace: "nowrap" }}>View Forecast</Link>
             </div>
           )}
 
-          {/* Stats */}
+          {/* ── Stats ── */}
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4,1fr)", gap: isMobile ? 10 : 16 }}>
             <StatCard icon={<Thermometer size={18} />} label="Temperature" value={ov?.temperature != null ? ov.temperature.toFixed(1) : "--"} unit="°C"   color="#ff8c42" sub="Current" trend="up" />
             <StatCard icon={<Droplets size={18} />}    label="Humidity"    value={ov?.humidity    != null ? ov.humidity.toFixed(0)    : "--"} unit="%"    color="#60a5fa" sub="Relative" />
@@ -226,52 +262,55 @@ export default function Dashboard() {
             <StatCard icon={<CloudRain size={18} />}   label="Rainfall"    value={ov?.rainfall    != null ? ov.rainfall.toFixed(1)    : "--"} unit="mm"   color="#a78bfa" sub="Sum" />
           </div>
 
-          {/* Status + Forecast */}
+          {/* ── Status + 7-day forecast ── */}
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 2fr", gap: isMobile ? 14 : 16 }}>
+            {/* Current Status — now shows real risk from predictions */}
             <div style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 20, padding: "18px 20px" }}>
               <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 14 }}>Current Status</div>
-              {(() => {
-                const todayPred = preds[0];
-                const rLabel = todayPred?.risk_label ?? "Unknown";
-                const rColor = RISK_COLOR[rLabel] ?? "#888";
-                const rProb  = todayPred ? Math.round(todayPred.risk_probability * 100) : 0;
-                return (
-                  <>
-                    <div style={{ textAlign: "center", padding: "16px 0" }}>
-                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", marginBottom: 6 }}>Fire Risk Level</div>
-                      <div style={{ fontSize: isMobile ? 34 : 44, fontWeight: 900, color: rColor, lineHeight: 1 }}>{rLabel}</div>
-                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 6 }}>Confidence: {rProb}%</div>
-                      <RiskBar pct={rProb / 100} color={rColor} />
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {[
-                        { label: "Status",      val: ov?.monitoringStatus ?? "--",     icon: <CheckCircle size={12} />, color: "#9DC88D" },
-                        { label: "Data Source", val: ov?.dataSource       ?? "--",     icon: <Database size={12} />,    color: "#60a5fa" },
-                        { label: "Alerts",      val: `${ov?.activeAlerts ?? 0} active`, icon: <Bell size={12} />,       color: "#F1B24A" },
-                      ].map(item => (
-                        <div key={item.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 12px", borderRadius: 12, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 7, color: "rgba(255,255,255,0.45)", fontSize: 12 }}><span style={{ color: item.color }}>{item.icon}</span>{item.label}</div>
-                          <span style={{ fontSize: 12, fontWeight: 600, color: "#fff" }}>{item.val}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                );
-              })()}
+              <div style={{ textAlign: "center", padding: "16px 0" }}>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", marginBottom: 6 }}>Fire Risk Level</div>
+                <div style={{ fontSize: isMobile ? 34 : 44, fontWeight: 900, color: riskColor, lineHeight: 1, textShadow: `0 0 30px ${riskColor}50` }}>
+                  {riskLabel}
+                </div>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 6 }}>
+                  Confidence: {(riskProb * 100).toFixed(0)}%
+                </div>
+                <RiskBar pct={riskProb} color={riskColor} />
+                {riskLabel === "Unknown" && (
+                  <div style={{ marginTop: 10, fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
+                    Run ML Prediction to get forecast
+                  </div>
+                )}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {[
+                  { label: "Status",      val: ov?.monitoringStatus ?? "--",     icon: <CheckCircle size={12} />, color: "#9DC88D" },
+                  { label: "Data Source", val: ov?.dataSource       ?? "--",     icon: <Database size={12} />,    color: "#60a5fa" },
+                  { label: "Alerts",      val: `${ov?.activeAlerts ?? 0} active`, icon: <Bell size={12} />,       color: "#F1B24A" },
+                ].map(item => (
+                  <div key={item.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 12px", borderRadius: 12, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 7, color: "rgba(255,255,255,0.45)", fontSize: 12 }}><span style={{ color: item.color }}>{item.icon}</span>{item.label}</div>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: "#fff" }}>{item.val}</span>
+                  </div>
+                ))}
+              </div>
             </div>
 
+            {/* 7-Day Forecast */}
             <div style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 20, padding: "18px 20px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
                 <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", textTransform: "uppercase", letterSpacing: 0.8 }}>7-Day Risk Forecast</div>
                 <Link to="/forecast" style={{ fontSize: 12, color: "#F1B24A", fontWeight: 600, textDecoration: "none", padding: "4px 10px", borderRadius: 999, background: "rgba(241,178,74,0.12)", border: "1px solid rgba(241,178,74,0.25)" }}>Full →</Link>
               </div>
               {preds.length === 0 ? (
-                <div style={{ textAlign: "center", padding: "28px 0", color: "rgba(255,255,255,0.3)", fontSize: 13 }}>
-                  No predictions yet.<br/>
-                  <span style={{ fontSize: 11, opacity: 0.7 }}>Run POST /api/ml/predict-forecast to generate</span>
+                <div style={{ textAlign: "center", padding: "32px 0", color: "rgba(255,255,255,0.3)", fontSize: 13 }}>
+                  No predictions yet.<br />
+                  <button onClick={() => runAction("/api/ml/predict-forecast")} style={{ marginTop: 12, padding: "8px 18px", borderRadius: 999, background: "rgba(241,178,74,0.15)", border: "1px solid rgba(241,178,74,0.3)", color: "#F1B24A", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+                    Run Prediction Now
+                  </button>
                 </div>
               ) : (
-                <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(preds.length, 7)},1fr)`, gap: isMobile ? 5 : 8 }}>
+                <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(preds.length, 7)}, 1fr)`, gap: isMobile ? 5 : 8 }}>
                   {preds.slice(0, 7).map((p, i) => {
                     const col = RISK_COLOR[p.risk_label] ?? "#9DC88D";
                     const day = new Date(p.date).toLocaleDateString("en", { weekday: "short" });
@@ -292,37 +331,37 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Trends + Areas */}
+          {/* ── Trends + Areas ── */}
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.5fr 1fr", gap: isMobile ? 14 : 16 }}>
             <div style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 20, padding: "18px 20px" }}>
               <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 16 }}>Weather Trends</div>
-              {data?.trends && data.trends.length > 0 ? (
+              {data?.trends?.length ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                   {[
                     { label: "Temperature (°C)", key: "temperature" as const, color: "#ff8c42" },
                     { label: "Humidity (%)",      key: "humidity" as const,    color: "#60a5fa" },
                     { label: "Wind Speed (km/h)", key: "windSpeed" as const,   color: "#9DC88D" },
-                  ].map(series => (
-                    <div key={series.label}>
+                  ].map(s => (
+                    <div key={s.label}>
                       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                        <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>{series.label}</span>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: series.color }}>{data.trends[data.trends.length - 1]?.[series.key]?.toFixed(1) ?? "--"}</span>
+                        <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>{s.label}</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: s.color }}>{data.trends[data.trends.length - 1]?.[s.key]?.toFixed(1) ?? "--"}</span>
                       </div>
-                      <SparkBar values={data.trends.map(t => t[series.key])} color={series.color} />
+                      <SparkBar values={data.trends.map(t => t[s.key])} color={s.color} />
                     </div>
                   ))}
                 </div>
               ) : (
                 <div style={{ textAlign: "center", padding: "28px 0", color: "rgba(255,255,255,0.3)", fontSize: 13 }}>
-                  No weather data.<br/>
-                  <span style={{ fontSize: 11, opacity: 0.7 }}>Run POST /api/weather/sync-all to fetch data</span>
+                  No weather data yet.<br />
+                  <button onClick={handleSync} style={{ marginTop: 12, padding: "8px 18px", borderRadius: 999, background: "rgba(157,200,141,0.12)", border: "1px solid rgba(157,200,141,0.3)", color: "#9DC88D", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>Sync Weather Now</button>
                 </div>
               )}
             </div>
 
             <div style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 20, padding: "18px 20px" }}>
               <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 14 }}>Monitored Areas</div>
-              {data?.areas && data.areas.length > 0 ? data.areas.map((area, i) => {
+              {data?.areas?.length ? data.areas.map((area, i) => {
                 const col = area.condition === "Critical Watch" ? "#ff4d4d" : area.condition === "Dry Conditions" ? "#F1B24A" : area.condition === "Wind Alert" ? "#ff8c42" : "#9DC88D";
                 return (
                   <div key={i} style={{ padding: "14px", borderRadius: 16, marginBottom: 10, background: "rgba(255,255,255,0.04)", border: `1px solid ${col}25` }}>
@@ -331,31 +370,27 @@ export default function Dashboard() {
                         <TreePine size={14} color="#9DC88D" />
                         <div>
                           <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{area.area}</div>
-                          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.38)", marginTop: 1 }}>{area.lat?.toFixed(3)}, {area.lng?.toFixed(3)}</div>
+                          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.38)" }}>{area.lat?.toFixed(3)}, {area.lng?.toFixed(3)}</div>
                         </div>
                       </div>
                       <span style={{ padding: "3px 8px", borderRadius: 999, fontSize: 10, fontWeight: 700, background: `${col}20`, color: col, border: `1px solid ${col}35` }}>{area.condition}</span>
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-                      {[
-                        { label: "Temp", val: `${area.avgTemperature?.toFixed(1)}°C`, color: "#ff8c42" },
-                        { label: "Hum",  val: `${area.avgHumidity?.toFixed(0)}%`,     color: "#60a5fa" },
-                        { label: "Wind", val: `${area.avgWindSpeed?.toFixed(1)}km/h`,  color: "#9DC88D" },
-                      ].map(m => (
+                      {[{ label: "Temp", val: `${area.avgTemperature?.toFixed(1)}°C`, color: "#ff8c42" }, { label: "Hum", val: `${area.avgHumidity?.toFixed(0)}%`, color: "#60a5fa" }, { label: "Wind", val: `${area.avgWindSpeed?.toFixed(1)}km/h`, color: "#9DC88D" }].map(m => (
                         <div key={m.label} style={{ textAlign: "center", padding: "7px 4px", borderRadius: 10, background: "rgba(255,255,255,0.04)" }}>
                           <div style={{ fontSize: 12, fontWeight: 700, color: m.color }}>{m.val}</div>
                           <div style={{ fontSize: 9, color: "rgba(255,255,255,0.35)", marginTop: 2 }}>{m.label}</div>
                         </div>
                       ))}
                     </div>
-                    <div style={{ marginTop: 10, padding: "7px 10px", borderRadius: 8, background: `${col}10`, border: `1px solid ${col}20`, fontSize: 11, color: "rgba(255,255,255,0.6)" }}>⚡ {area.action}</div>
+                    <div style={{ marginTop: 10, padding: "7px 10px", borderRadius: 8, background: `${col}10`, fontSize: 11, color: "rgba(255,255,255,0.6)" }}>⚡ {area.action}</div>
                   </div>
                 );
               }) : <div style={{ textAlign: "center", padding: "28px 0", color: "rgba(255,255,255,0.3)", fontSize: 13 }}>No area data yet</div>}
             </div>
           </div>
 
-          {/* Readings table */}
+          {/* ── Readings table ── */}
           <div style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 20, padding: "18px 20px", overflowX: "auto" }}>
             <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 14 }}>Recent Weather Readings</div>
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: isMobile ? 480 : "auto" }}>
@@ -377,28 +412,29 @@ export default function Dashboard() {
                       <td style={{ padding: "10px" }}><span style={{ padding: "3px 8px", borderRadius: 999, fontSize: 10, fontWeight: 700, background: `${col}18`, color: col, border: `1px solid ${col}30` }}>{r.status}</span></td>
                     </tr>
                   );
-                }) ?? <tr><td colSpan={6} style={{ textAlign: "center", padding: "28px", color: "rgba(255,255,255,0.3)", fontSize: 13 }}>No readings yet — sync weather data first</td></tr>}
+                }) ?? <tr><td colSpan={6} style={{ textAlign: "center", padding: "28px", color: "rgba(255,255,255,0.3)", fontSize: 13 }}>No readings — sync weather data first</td></tr>}
               </tbody>
             </table>
           </div>
 
-          {/* Quick Actions */}
+          {/* ── Quick Actions ── */}
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 1fr", gap: isMobile ? 14 : 16 }}>
             <div style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 20, padding: "18px 20px" }}>
               <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 14 }}>Quick Actions</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {[
-                  { label: "Sync Weather Data", color: "#9DC88D", icon: <RefreshCw size={14} />, endpoint: "/api/weather/sync-all",    method: "POST" },
-                  { label: "Run ML Prediction", color: "#F1B24A", icon: <Cpu size={14} />,        endpoint: "/api/ml/predict-forecast", method: "POST" },
-                  { label: "Send Risk Alert",   color: "#ff8c42", icon: <Bell size={14} />,       endpoint: "/api/alerts/run-email",    method: "POST" },
-                  { label: "Retrain Model",     color: "#c084fc", icon: <BarChart2 size={14} />,  endpoint: "/api/ml/train",            method: "POST" },
-                ].map(action => (
-                  <button key={action.label} onClick={async () => {
-                    try { await fetch(`${API}${action.endpoint}`, { method: action.method }); if (action.endpoint.includes("sync") || action.endpoint.includes("predict")) fetchAll(); } catch { /**/ }
-                  }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 12, cursor: "pointer", background: `${action.color}12`, border: `1px solid ${action.color}28`, color: action.color, fontWeight: 600, fontSize: 13, textAlign: "left" }}>
-                    {action.icon} {action.label}
+                  { label: "1. Sync Weather Data",  color: "#9DC88D", icon: <RefreshCw size={14} />, ep: "/api/weather/sync-all" },
+                  { label: "2. Run ML Prediction",  color: "#F1B24A", icon: <Cpu size={14} />,       ep: "/api/ml/predict-forecast" },
+                  { label: "3. Send Risk Alert",    color: "#ff8c42", icon: <Bell size={14} />,      ep: "/api/alerts/run-email" },
+                  { label: "4. Retrain Model",      color: "#c084fc", icon: <BarChart2 size={14} />, ep: "/api/ml/train" },
+                ].map(a => (
+                  <button key={a.label} onClick={() => runAction(a.ep)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 12, cursor: "pointer", background: `${a.color}12`, border: `1px solid ${a.color}28`, color: a.color, fontWeight: 600, fontSize: 13, textAlign: "left" }}>
+                    {a.icon} {a.label}
                   </button>
                 ))}
+              </div>
+              <div style={{ marginTop: 12, padding: "10px 12px", borderRadius: 10, background: "rgba(255,255,255,0.04)", fontSize: 11, color: "rgba(255,255,255,0.4)" }}>
+                💡 Run steps 1→2 in order to populate dashboard data
               </div>
             </div>
 
@@ -436,7 +472,7 @@ export default function Dashboard() {
       </div>
 
       <style>{`
-        @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+        @keyframes spin  { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
         @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.45;transform:scale(1.35)} }
         * { box-sizing:border-box; }
         ::-webkit-scrollbar { width:4px; height:4px; }
