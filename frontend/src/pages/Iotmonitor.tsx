@@ -8,7 +8,8 @@ import {
   WifiOff, Zap,
 } from "lucide-react";
 import logo from "../assets/logo.png";
-const API = "https://fire-risk-monitoring-system-1.onrender.com";
+
+import { API } from "../api";
 
 interface IoTDevice {
   id: string; name: string; location: string; lat: number; lng: number;
@@ -18,7 +19,7 @@ interface IoTDevice {
   smokeAlert: boolean; alertSent: boolean;
 }
 interface SensorReading {
-  device_id: string; measured_at: string; temperature: number; humidity: number;
+  device_id: string; recorded_at: string; temperature: number; humidity: number;
   smoke_ppm?: number; co2_ppm?: number; heat_index?: number;
   wind_speed?: number; fire_detected?: boolean;
 }
@@ -129,7 +130,7 @@ export default function IoTMonitor() {
 
   const fetchDevices = async () => {
     try {
-      const sensorRes = await fetch(`${API}/api/sensor/all?limit=50`);
+      const sensorRes = await fetch(`${API}/api/sensor/readings?limit=50`);
       if (sensorRes.ok) {
         const data = await sensorRes.json();
         const raw: SensorReading[] = data.data || data.readings || [];
@@ -141,7 +142,7 @@ export default function IoTMonitor() {
           const smoke  = latest.smoke_ppm ?? 0;
           const co2    = latest.co2_ppm   ?? 400;
           const fireDetected = latest.fire_detected ?? (smoke > 300);
-          return { id, name: `Sensor Node ${idx + 1}`, location: `Zone ${String.fromCharCode(65 + idx)}`, lat: 28.002 + idx * 0.01, lng: 83.036 + idx * 0.01, online: true, battery: 100 - (idx * 11) % 70, lastSeen: latest.measured_at, temperature: latest.temperature, humidity: latest.humidity, smoke, co2, heatIndex: latest.heat_index ?? latest.temperature + 2, windSpeed: latest.wind_speed ?? 0, fireDetected, smokeAlert: smoke > 150 && !fireDetected, alertSent: alertedRef.current.has(id) };
+          return { id, name: `Sensor Node ${idx + 1}`, location: `Zone ${String.fromCharCode(65 + idx)}`, lat: 28.002 + idx * 0.01, lng: 83.036 + idx * 0.01, online: true, battery: 100 - (idx * 11) % 70, lastSeen: latest.recorded_at, temperature: latest.temperature, humidity: latest.humidity, smoke, co2, heatIndex: latest.heat_index ?? latest.temperature + 2, windSpeed: latest.wind_speed ?? 0, fireDetected, smokeAlert: smoke > 150 && !fireDetected, alertSent: alertedRef.current.has(id) };
         });
         setDevices(deviceList);
         const fireDevices = deviceList.filter(d => d.fireDetected && !alertedRef.current.has(d.id));
@@ -454,7 +455,7 @@ export default function IoTMonitor() {
                       const fireColor = r.fire_detected ? "#ff4d4d" : smoke > 150 ? "#ff8c42" : "#9DC88D";
                       return (
                         <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-                          <td style={{ padding: "9px 10px", fontSize: 11, color: "rgba(255,255,255,0.5)" }}>{new Date(r.measured_at).toLocaleTimeString()}</td>
+                          <td style={{ padding: "9px 10px", fontSize: 11, color: "rgba(255,255,255,0.5)" }}>{new Date(r.recorded_at).toLocaleTimeString()}</td>
                           <td style={{ padding: "9px 10px", fontSize: 11, color: "rgba(255,255,255,0.7)", fontWeight: 600 }}>{r.device_id}</td>
                           <td style={{ padding: "9px 10px", fontSize: 12, fontWeight: 700, color: "#ff8c42" }}>{r.temperature?.toFixed(1)}°C</td>
                           <td style={{ padding: "9px 10px", fontSize: 12, color: "#60a5fa" }}>{r.humidity?.toFixed(0)}%</td>

@@ -15,27 +15,53 @@ import path from "path";
 
 const app = express();
 
-app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "https://fire-risk-monitoring-system-2.onrender.com"
-  ],
-  credentials: true,
-}));
+// ── CORS ───────────────────────────────────────────────────────────────────
+const ALLOWED_ORIGINS = [
+  "https://fire-risk-monitoring-system-2.onrender.com", // Render frontend
+  "http://localhost:5173",                               // Vite dev
+  "http://localhost:4173",                               // Vite preview
+  "http://localhost:3000",                               // Express dev
+];
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true); // Postman / curl / mobile
+      if (ALLOWED_ORIGINS.includes(origin))     return callback(null, true);
+      if (origin.endsWith(".onrender.com"))      return callback(null, true);
+      callback(new Error(`CORS blocked: ${origin}`));
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// ── Health check ───────────────────────────────────────────────────────────
 app.get("/check", (_req, res) => {
-  res.json({ ok: true, message: "Backend running" });
+  res.json({
+    ok:          true,
+    message:     "Backend running",
+    environment: process.env.NODE_ENV || "development",
+    frontend:    config.frontendUrl,
+    timestamp:   new Date().toISOString(),
+  });
 });
 
+// ── API routes ─────────────────────────────────────────────────────────────
 app.use("/api/weather",   weatherRouter);
 app.use("/api/sensor",    sensorRouter);
 app.use("/api/alerts",    alertsRouter);
 app.use("/api/ml",        mlRouter);
 app.use("/api/dashboard", dashboardRouter);
 
-function runPython(scriptRelPath: string): Promise<{ code: number; stdout: string; stderr: string }> {
+// ── Python runner ──────────────────────────────────────────────────────────
+function runPython(
+  scriptRelPath: string,
+): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const scriptPath = path.resolve(process.cwd(), scriptRelPath);
     const p = spawn("python", ["-u", scriptPath], {
@@ -50,94 +76,97 @@ function runPython(scriptRelPath: string): Promise<{ code: number; stdout: strin
   });
 }
 
+// ── Full ML pipeline ───────────────────────────────────────────────────────
 async function runFullPipeline(label: string): Promise<void> {
   console.log(`\n${"─".repeat(50)}`);
-  console.log(` [${label}] Starting full pipeline …`);
-  console.log(`${"─".repeat(50)}`);
+  console.log(` [${label}] Starting pipeline …`);
 
-  try { await syncWeatherData(); }
-  catch (err: any) { console.error(` [${label}] Weather sync failed: ${err.message}`); return; }
-
-  const trainResult = await runPython("ml/scripts/train_model.py");
-  if (trainResult.code !== 0) { console.error(` [${label}] Training failed:\n${trainResult.stderr}`); return; }
-
-  const testResult = await runPython("ml/scripts/test_with_archive.py");
-  if (testResult.code !== 0) console.warn(`  [${label}] Archive test failed (non-fatal)`);
-
-  const predictResult = await runPython("ml/scripts/predict_forecast.py");
-  if (predictResult.code !== 0) { console.error(` [${label}] Prediction failed:\n${predictResult.stderr}`); return; }
-
-  const extremeAlert = await autoAlertAfterPrediction();
-  if (extremeAlert.sent) {
-    console.log(` [${label}] 🔴 Alert sent — ${extremeAlert.alerts} day(s) flagged`);
-  } else {
-    console.log(` [${label}] No alert needed — ${extremeAlert.message}`);
+  try {
+    await syncWeatherData();
+    console.log(` [${label}] ✅ Weather synced`);
+  } catch (err: any) {
+    console.error(` [${label}] ❌ Weather sync failed: ${err.message}`);
+    return;
   }
 
-  console.log(`\n [${label}] Pipeline completed\n${"─".repeat(50)}\n`);
+  const train = await runPython("ml/scripts/train_model.py");
+  if (train.code !== 0) {
+    console.error(` [${label}] ❌ Training failed:\n${train.stderr}`);
+    return;
+  }
+  console.log(` [${label}] ✅ Model trained`);
+
+  const test = await runPython("ml/scripts/test_with_archive.py");
+  if (test.code !== 0) console.warn(` [${label}] ⚠ Archive test failed (non-fatal)`);
+
+  const predict = await runPython("ml/scripts/predict_forecast.py");
+  if (predict.code !== 0) {
+    console.error(` [${label}] ❌ Prediction failed:\n${predict.stderr}`);
+    return;
+  }
+  console.log(` [${label}] ✅ Forecast predicted`);
+
+  const alert = await autoAlertAfterPrediction();
+  if (alert.sent) {
+    console.log(` [${label}] 🔴 Alert sent — ${alert.alerts} day(s)`);
+  } else {
+    console.log(` [${label}] ✅ No alert needed — ${alert.message}`);
+  }
+  console.log(`${"─".repeat(50)}\n`);
 }
 
-async function startupPipeline(attempt = 1) {
-    try {
-        await runFullPipeline("Startup");
-    } catch (error) {
-        console.error(` [Startup] Attempt ${attempt} failed:`, error?.message);
-        if (attempt < 5) {
-            const waitSecs = attempt * 10;
-            console.log(` [Startup] Retrying in ${waitSecs}s...`);
-            setTimeout(() => startupPipeline(attempt + 1), waitSecs * 1000);
-        } else {
-            console.error(" [Startup] All retries exhausted. Server continues without pipeline.");
-        }
+// ── Startup with retry ─────────────────────────────────────────────────────
+async function startupPipeline(attempt = 1): Promise<void> {
+  try {
+    await runFullPipeline("Startup");
+  } catch (err: any) {
+    if (attempt < 5) {
+      const wait = attempt * 10;
+      console.log(` [Startup] Retry ${attempt} in ${wait}s…`);
+      setTimeout(() => startupPipeline(attempt + 1), wait * 1000);
     }
+  }
 }
 
-// ── Daily 10:35 AM Report Scheduler ───────────────────────────────────────
+// ── Daily report scheduler ─────────────────────────────────────────────────
 function scheduleDailyReport(): void {
-  function getMillisUntil1035(): number {
+  function msUntilNoon(): number {
     const now  = new Date();
     const next = new Date();
     next.setHours(12, 0, 0, 0);
     if (now >= next) next.setDate(next.getDate() + 1);
     return next.getTime() - now.getTime();
   }
-
   function scheduleNext(): void {
-    const ms  = getMillisUntil1035();
-    const hrs = (ms / 3600000).toFixed(2);
-    console.log(` [Daily Report] Next report in ${hrs}h (at 12:00 PM)`);
-
+    const ms = msUntilNoon();
+    console.log(` [Daily] Next report in ${(ms / 3600000).toFixed(2)}h`);
     setTimeout(async () => {
-      console.log("\n [Daily Report] Sending daily fire risk report …");
-      const result = await sendDailyRiskReport();
-      if (result.sent) {
-        console.log(` [Daily Report] ✅ Sent | Risk: ${result.riskLevel}`);
-      } else {
-        console.log(` [Daily Report] ⚠️  Skipped: ${result.message}`);
-      }
+      const r = await sendDailyRiskReport();
+      console.log(r.sent ? ` [Daily] ✅ Sent | ${r.riskLevel}` : ` [Daily] ⚠ ${r.message}`);
       scheduleNext();
     }, ms);
   }
-
   scheduleNext();
 }
 
-// ── Start server ───────────────────────────────────────────────────────────
+// ── Start ──────────────────────────────────────────────────────────────────
 app.listen(config.port, "0.0.0.0", () => {
-  console.log(` Server running at http://0.0.0.0:${config.port}`);
+  console.log(`\n${"═".repeat(55)}`);
+  console.log(` 🔥  वन दृष्टि — Fire Risk Monitoring Backend`);
+  console.log(` URL      : https://fire-risk-monitoring-system-1.onrender.com`);
+  console.log(` Frontend : https://fire-risk-monitoring-system-2.onrender.com`);
+  console.log(` Port     : ${config.port}`);
+  console.log(` Env      : ${process.env.NODE_ENV}`);
+  console.log(`${"═".repeat(55)}\n`);
 
   if (config.syncOnStart) {
-        // Delay pipeline start by 15s so Render's health check passes first
-        setTimeout(() => {
-            startupPipeline().catch((err) => {
-                console.error(" [Startup] Pipeline error (non-fatal):", err?.message);
-            });
-        }, 15000);
-    }
+    console.log(" [Startup] Pipeline starts in 5s…");
+    setTimeout(() => startupPipeline(), 5000);
+  }
 
-  const intervalMs = config.syncIntervalMinutes * 60 * 1000;
-  console.log(` Pipeline scheduled every ${config.syncIntervalMinutes} minutes`);
-  setInterval(() => runFullPipeline("Scheduled"), intervalMs);
+  const ms = config.syncIntervalMinutes * 60 * 1000;
+  console.log(` [Scheduler] Pipeline every ${config.syncIntervalMinutes} min`);
+  setInterval(() => runFullPipeline("Scheduled"), ms);
 
   scheduleDailyReport();
 });

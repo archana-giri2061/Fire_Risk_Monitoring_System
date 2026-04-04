@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import logo from "../assets/logo.png";
 
-const API = "https://fire-risk-monitoring-system-1.onrender.com";
+import { API } from "../api";
 
 const RISK_COLOR: Record<string, string> = { Low: "#9DC88D", Moderate: "#F1B24A", High: "#ff8c42", Extreme: "#ff4d4d" };
 const RISK_BG:    Record<string, string> = { Low: "rgba(157,200,141,0.15)", Moderate: "rgba(241,178,74,0.15)", High: "rgba(255,140,66,0.15)", Extreme: "rgba(255,77,77,0.15)" };
