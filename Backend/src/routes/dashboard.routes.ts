@@ -4,176 +4,127 @@ import { config } from "../config";
 
 export const dashboardRouter = Router();
 
-function toNumber(value: any, fallback = 0): number {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
+function toNum(v: any, fb = 0): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fb;
 }
-
-function getCondition(temp: number, hum: number, wind: number, rain: number): string {
-  if (temp >= 32 && hum <= 40 && wind >= 18) return "Critical Watch";
-  if (hum <= 45 && rain <= 1)                return "Dry Conditions";
-  if (wind >= 20)                             return "Wind Alert";
+function condition(t: number, h: number, w: number, r: number): string {
+  if (t >= 32 && h <= 40 && w >= 18) return "Critical Watch";
+  if (h <= 45 && r <= 1)              return "Dry Conditions";
+  if (w >= 20)                        return "Wind Alert";
   return "Stable";
 }
-
-function getAction(condition: string): string {
-  const map: Record<string, string> = {
-    "Critical Watch": "Immediate monitoring required",
-    "Dry Conditions":  "Monitor closely",
-    "Wind Alert":      "Check windy zones",
-  };
-  return map[condition] ?? "Routine monitoring";
+function action(c: string): string {
+  return ({ "Critical Watch": "Immediate monitoring required", "Dry Conditions": "Monitor closely", "Wind Alert": "Check windy zones" } as any)[c] ?? "Routine monitoring";
 }
-
-function getSeverity(condition: string): string {
-  const map: Record<string, string> = {
-    "Critical Watch": "High",
-    "Dry Conditions":  "Medium",
-    "Wind Alert":      "Medium",
-  };
-  return map[condition] ?? "Low";
+function severity(c: string): string {
+  return ({ "Critical Watch": "High", "Dry Conditions": "Medium", "Wind Alert": "Medium" } as any)[c] ?? "Low";
 }
 
 dashboardRouter.get("/home", async (_req, res) => {
   try {
-    // ── 1. Weather archive ────────────────────────────────────────────────
-    const archiveResult = await pool.query(
+    // ── 1. Weather archive ─────────────────────────────────────────────────
+    const archiveRes = await pool.query(
       `SELECT date, location_key, latitude, longitude,
               temp_mean, humidity_mean, wind_speed_max, precipitation_sum, updated_at
        FROM daily_weather
-       WHERE location_key = $1 AND data_source = 'archive'
+       WHERE location_key=$1 AND data_source='archive'
        ORDER BY date DESC LIMIT 12`,
-      [config.locationKey]
+      [config.locationKey],
     );
+    const rows = archiveRes.rows;
 
-    const latestRows = archiveResult.rows;
-
-    if (!latestRows.length) {
+    if (!rows.length) {
       return res.json({
-        overview: {
-          monitoringStatus: "No Data", lastUpdated: "Not available",
-          dataSource: "Database — run Sync Now",
-          temperature: 0, humidity: 0, windSpeed: 0, rainfall: 0,
-          pressure: 0, activeAlerts: 0,
-        },
-        trends: [], readings: [], alerts: [], areas: [],
+        overview: { monitoringStatus: "No Data", lastUpdated: "Not available", dataSource: "Run Sync Now", temperature: 0, humidity: 0, windSpeed: 0, rainfall: 0, pressure: 0, activeAlerts: 0, riskLabel: "Unknown", riskProbability: 0 },
+        predictions: [], trends: [], readings: [], alerts: [], areas: [],
       });
     }
 
-    const latest   = latestRows[0];
-    const trendRows = [...latestRows].reverse();
+    const latest   = rows[0];
+    const trendRows = [...rows].reverse();
 
-    // ── 2. Latest predictions ─────────────────────────────────────────────
+    // ── 2. ML predictions (graceful if table missing) ──────────────────────
     let predictions: any[] = [];
     try {
-      const predResult = await pool.query(
-        `SELECT date, risk_code, risk_label, COALESCE(risk_probability,0) AS risk_probability
+      const predRes = await pool.query(
+        `SELECT date, risk_code, risk_label,
+                COALESCE(risk_probability,0) AS risk_probability,
+                model_name
          FROM fire_risk_predictions
          WHERE latitude=$1 AND longitude=$2 AND date>=CURRENT_DATE
          ORDER BY date ASC LIMIT 7`,
-        [config.latitude, config.longitude]
+        [config.latitude, config.longitude],
       );
-      predictions = predResult.rows;
-    } catch {
-      predictions = [];
-    }
+      predictions = predRes.rows.map((r) => ({
+        date:             String(r.date).slice(0, 10),
+        risk_code:        r.risk_code,
+        risk_label:       r.risk_label,
+        risk_probability: Number(r.risk_probability),
+        model_name:       r.model_name,
+      }));
+    } catch { predictions = []; }
 
-    // ── 3. Sensor readings ────────────────────────────────────────────────
-    let sensorRows: any[] = [];
+    // ── 3. IoT sensor readings (graceful if table missing) ─────────────────
+    let sensorMap: Record<string, number> = {};
     try {
-      const sensorResult = await pool.query(
-        `SELECT DISTINCT ON (sensor_type) sensor_type, value, measured_at
-         FROM iot_sensor_readings ORDER BY sensor_type, measured_at DESC`
+      const sRes = await pool.query(
+        `SELECT DISTINCT ON (sensor_type) sensor_type, value
+         FROM iot_sensor_readings ORDER BY sensor_type, measured_at DESC`,
       );
-      sensorRows = sensorResult.rows;
-    } catch {
-      sensorRows = [];
-    }
+      for (const r of sRes.rows) sensorMap[String(r.sensor_type).toLowerCase()] = toNum(r.value);
+    } catch { sensorMap = {}; }
 
-    const sensorMap: Record<string, number> = {};
-    for (const row of sensorRows) {
-      sensorMap[String(row.sensor_type).toLowerCase()] = toNumber(row.value);
-    }
+    const temperature = sensorMap["temperature"] ?? toNum(latest.temp_mean);
+    const humidity    = sensorMap["humidity"]    ?? toNum(latest.humidity_mean);
+    const windSpeed   = sensorMap["wind"] ?? sensorMap["wind_speed"] ?? toNum(latest.wind_speed_max);
+    const rainfall    = sensorMap["rainfall"] ?? sensorMap["precipitation"] ?? toNum(latest.precipitation_sum);
 
-    // ── 4. Merge: sensor overrides weather ────────────────────────────────
-    const temperature = sensorMap["temperature"] ?? toNumber(latest.temp_mean);
-    const humidity    = sensorMap["humidity"]    ?? toNumber(latest.humidity_mean);
-    const windSpeed   = sensorMap["wind"] ?? sensorMap["wind_speed"] ?? toNumber(latest.wind_speed_max);
-    const rainfall    = sensorMap["rainfall"] ?? sensorMap["precipitation"] ?? toNumber(latest.precipitation_sum);
-
-    // ── 5. Build readings ─────────────────────────────────────────────────
-    const readings = latestRows.map((row) => {
-      const t = toNumber(row.temp_mean);
-      const h = toNumber(row.humidity_mean);
-      const w = toNumber(row.wind_speed_max);
-      const r = toNumber(row.precipitation_sum);
-      return {
-        time:        String(row.date).slice(0, 10),
-        location:    row.location_key,
-        temperature: t, humidity: h, windSpeed: w, rainfall: r, pressure: 0,
-        status:      getCondition(t, h, w, r),
-      };
+    // ── 4. Build arrays ────────────────────────────────────────────────────
+    const readings = rows.map((r) => {
+      const t = toNum(r.temp_mean), h = toNum(r.humidity_mean), w = toNum(r.wind_speed_max), rf = toNum(r.precipitation_sum);
+      return { time: String(r.date).slice(0, 10), location: r.location_key, temperature: t, humidity: h, windSpeed: w, rainfall: rf, pressure: 0, status: condition(t, h, w, rf) };
     });
 
-    const trends = trendRows.map((row) => ({
-      time:        String(row.date).slice(0, 10),
-      temperature: toNumber(row.temp_mean),
-      humidity:    toNumber(row.humidity_mean),
-      windSpeed:   toNumber(row.wind_speed_max),
+    const trends = trendRows.map((r) => ({
+      time: String(r.date).slice(0, 10), temperature: toNum(r.temp_mean), humidity: toNum(r.humidity_mean), windSpeed: toNum(r.wind_speed_max),
     }));
 
-    const latestCondition = getCondition(temperature, humidity, windSpeed, rainfall);
-
+    const cond = condition(temperature, humidity, windSpeed, rainfall);
     const areas = [{
-      area:           config.locationKey,
-      avgTemperature: temperature,
-      avgHumidity:    humidity,
-      avgWindSpeed:   windSpeed,
-      condition:      latestCondition,
-      action:         getAction(latestCondition),
-      lat:            toNumber(latest.latitude,  config.latitude),
-      lng:            toNumber(latest.longitude, config.longitude),
+      area: config.locationKey, avgTemperature: temperature, avgHumidity: humidity, avgWindSpeed: windSpeed,
+      condition: cond, action: action(cond),
+      lat: toNum(latest.latitude, config.latitude), lng: toNum(latest.longitude, config.longitude),
     }];
 
-    const alertMessages: Record<string, string> = {
+    const alertMsg: Record<string, string> = {
       "Critical Watch": "High temperature, low humidity, and strong wind — urgent monitoring required.",
-      "Dry Conditions":  "Dry environmental conditions detected in the monitored area.",
-      "Wind Alert":      "Strong wind conditions detected in the monitored area.",
+      "Dry Conditions":  "Dry environmental conditions detected.",
+      "Wind Alert":      "Strong wind conditions detected.",
     };
-    const alerts = latestCondition === "Stable" ? [] : [{
-      time:     String(latest.date).slice(0, 10),
-      type:     latestCondition,
-      location: config.locationKey,
-      severity: getSeverity(latestCondition),
-      message:  alertMessages[latestCondition] ?? "",
+    const weatherAlerts = cond === "Stable" ? [] : [{
+      time: String(latest.date).slice(0, 10), type: cond, location: config.locationKey, severity: severity(cond), message: alertMsg[cond] ?? "",
     }];
 
-    // ── 6. Build overview — use latest prediction for risk level ──────────
-    const todayPred   = predictions[0];
-    const riskLabel   = todayPred?.risk_label   ?? "Unknown";
-    const riskProb    = todayPred ? Number(todayPred.risk_probability) : 0;
+    // ── 5. Use today's prediction for overview risk ────────────────────────
+    const todayPred      = predictions[0];
+    const riskLabel      = todayPred?.risk_label      ?? "Unknown";
+    const riskProbability = todayPred?.risk_probability ?? 0;
 
     return res.json({
       overview: {
         monitoringStatus: "Active",
-        lastUpdated:  latest.updated_at
-          ? new Date(latest.updated_at).toLocaleString()
-          : String(latest.date).slice(0, 10),
-        dataSource:   sensorRows.length > 0 ? "Database + Sensor Readings" : "Database",
-        temperature,
-        humidity,
-        windSpeed,
-        rainfall,
-        pressure:     0,
-        activeAlerts: alerts.length,
-        // ← these are now returned so frontend can show real risk
+        lastUpdated:      latest.updated_at ? new Date(latest.updated_at).toLocaleString() : String(latest.date).slice(0, 10),
+        dataSource:       Object.keys(sensorMap).length > 0 ? "Database + IoT Sensors" : "Database",
+        temperature, humidity, windSpeed, rainfall, pressure: 0,
+        activeAlerts:     weatherAlerts.length,
         riskLabel,
-        riskProbability: riskProb,
+        riskProbability,
       },
-      predictions,   // ← full 7-day predictions array
+      predictions,   // full 7-day array
       trends,
       readings,
-      alerts,
+      alerts:  weatherAlerts,
       areas,
     });
 
