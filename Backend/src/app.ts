@@ -13,6 +13,71 @@ import { sendDailyRiskReport } from "./services/dailyReport.service";
 import { spawn } from "child_process";
 import path from "path";
 
+
+// ── Auto-create all required tables ───────────────────────────────────────
+async function initDB(): Promise<void> {
+  const { pool } = await import("./db");
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS iot_sensor_readings (
+      id          SERIAL PRIMARY KEY,
+      device_id   TEXT NOT NULL,
+      sensor_id   TEXT NOT NULL,
+      sensor_type TEXT NOT NULL,
+      value       DOUBLE PRECISION NOT NULL,
+      unit        TEXT,
+      measured_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      seq         BIGINT NOT NULL DEFAULT 0,
+      UNIQUE (device_id, sensor_id, seq)
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS alert_logs (
+      id           SERIAL PRIMARY KEY,
+      location_key TEXT NOT NULL,
+      risk_label   TEXT NOT NULL,
+      alert_date   DATE NOT NULL,
+      message      TEXT,
+      created_at   TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE (location_key, alert_date, risk_label)
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS daily_weather (
+      id                SERIAL PRIMARY KEY,
+      date              DATE NOT NULL,
+      location_key      TEXT NOT NULL,
+      latitude          DOUBLE PRECISION,
+      longitude         DOUBLE PRECISION,
+      temp_max          DOUBLE PRECISION,
+      temp_min          DOUBLE PRECISION,
+      temp_mean         DOUBLE PRECISION,
+      humidity_mean     DOUBLE PRECISION,
+      precipitation_sum DOUBLE PRECISION,
+      wind_speed_max    DOUBLE PRECISION,
+      data_source       TEXT DEFAULT 'archive',
+      updated_at        TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE (date, location_key, data_source)
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS daily_weather_forecast (
+      id                SERIAL PRIMARY KEY,
+      date              DATE NOT NULL,
+      latitude          DOUBLE PRECISION NOT NULL,
+      longitude         DOUBLE PRECISION NOT NULL,
+      temp_max          DOUBLE PRECISION,
+      temp_min          DOUBLE PRECISION,
+      temp_mean         DOUBLE PRECISION,
+      humidity_mean     DOUBLE PRECISION,
+      precipitation_sum DOUBLE PRECISION,
+      wind_speed_max    DOUBLE PRECISION,
+      updated_at        TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE (date, latitude, longitude)
+    );
+  `);
+  console.log(" [DB] All tables ready ✅");
+}
+
 const app = express();
 
 // ── CORS ───────────────────────────────────────────────────────────────────
@@ -143,7 +208,10 @@ app.listen(config.port, "0.0.0.0", () => {
   console.log(` Port     : ${config.port}  |  Env: ${process.env.NODE_ENV}`);
   console.log(`${"═".repeat(55)}\n`);
 
-  if (config.syncOnStart) { console.log(" [Startup] Pipeline in 5s…"); setTimeout(() => startupPipeline(), 5000); }
+  // Init DB tables first, then start pipeline
+  initDB().then(() => {
+    if (config.syncOnStart) { console.log(" [Startup] Pipeline in 5s…"); setTimeout(() => startupPipeline(), 5000); }
+  }).catch((e: any) => console.error(" [DB] Init failed:", e.message));
   setInterval(() => runFullPipeline("Scheduled"), config.syncIntervalMinutes * 60 * 1000);
   scheduleDailyReport();
 });

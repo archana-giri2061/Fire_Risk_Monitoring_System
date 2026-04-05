@@ -11,6 +11,21 @@ sensorRouter.post("/ingest", async (req, res) => {
       return res.status(400).json({ ok: false, error: "Missing required fields: device_id, seq, measured_at, readings[]" });
     }
 
+    // Auto-create table if it doesn't exist
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS iot_sensor_readings (
+        id          SERIAL PRIMARY KEY,
+        device_id   TEXT NOT NULL,
+        sensor_id   TEXT NOT NULL,
+        sensor_type TEXT NOT NULL,
+        value       DOUBLE PRECISION NOT NULL,
+        unit        TEXT,
+        measured_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        seq         BIGINT NOT NULL DEFAULT 0,
+        UNIQUE (device_id, sensor_id, seq)
+      );
+    `);
+
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
