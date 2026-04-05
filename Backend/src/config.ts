@@ -1,6 +1,7 @@
+import path from "path";
 import dotenv from "dotenv";
-import path from "path"
-dotenv.config({path:path.resolve(__dirname, "../.env")});
+dotenv.config({ path: path.resolve(__dirname, "../.env") });
+
 export const config = {
   port:                Number(process.env.PORT || 3000),
   frontendUrl:         process.env.FRONTEND_URL || "http://localhost:5173",
@@ -15,7 +16,6 @@ export const config = {
   syncIntervalMinutes: Number(process.env.SYNC_INTERVAL_MINUTES || 30),
   datasetExportPath:   process.env.DATASET_EXPORT_PATH || "ml/data/live_weather_dataset.csv",
 
-  // Resend replaces nodemailer — Render blocks SMTP port 587
   resendApiKey: process.env.RESEND_API_KEY || "",
 
   smtp: {

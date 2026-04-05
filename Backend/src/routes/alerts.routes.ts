@@ -140,17 +140,15 @@ alertsRouter.post("/test-email", async (_req, res) => {
       [
         "This is a test email from your Wildfire Risk Monitoring System.",
         "",
-        "If you received this, your SMTP configuration is working correctly.",
-        "",
         `Location : ${config.locationKey}`,
         `Coords   : lat=${config.latitude}, lon=${config.longitude}`,
-        `SMTP Host: ${config.smtp.host}`,
         "",
         "वन दृष्टि — Wildfire Risk Monitoring System",
       ].join("\n"),
     );
     res.json({ ok: true, message: "Test email sent successfully.", to: config.smtp.to });
   } catch (e: any) {
+    console.error("❌ test-email failed:", e.message); // ← add this line
     res.status(500).json({ ok: false, error: e.message });
   }
 });
