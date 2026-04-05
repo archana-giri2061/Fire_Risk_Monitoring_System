@@ -17,7 +17,7 @@ sensorRouter.post("/ingest", async (req, res) => {
       const sql = `
         INSERT INTO iot_sensor_readings (device_id,sensor_id,sensor_type,value,unit,measured_at,seq)
         VALUES ($1,$2,$3,$4,$5,$6,$7)
-        ON CONFLICT (device_id,sensor_id,s eq)
+        ON CONFLICT (device_id,sensor_id,seq)
         DO UPDATE SET value=EXCLUDED.value, unit=EXCLUDED.unit, measured_at=EXCLUDED.measured_at
       `;
       for (const r of readings) {
