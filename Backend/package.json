@@ -4,13 +4,13 @@
   "main": "dist/app.js",
   "scripts": {
     "dev": "ts-node-dev --respawn src/app.ts",
-    "build": "tsc",
+    "build": "pip3 install -r ml/scripts/requirements.txt && tsc",
     "start": "node dist/app.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "description": "वन दृष्टि — Fire Risk Monitoring Backend",
   "dependencies": {
     "@types/node": "^25.5.0",
     "cors": "^2.8.6",

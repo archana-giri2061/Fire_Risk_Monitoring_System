@@ -4,9 +4,6 @@ scikit-learn
 xgboost
 sqlalchemy
 openpyxl
-fastapi
-uvicorn[standard]
-pydantic
-asyncpg
-httpx
+psycopg2-binary
 python-dotenv
+numpy

@@ -1,12 +1,7 @@
 import { Router } from "express";
 import { config } from "../config";
 import { runRiskEmailAlerts, sendIoTFireAlert } from "../services/alertEngine.service";
-import { 
-  sendEmailAlert, 
-  buildFireAlertHtml, 
-  buildFireAlertText, 
-  sendFireAlert 
-} from "../services/email.service";
+import { sendEmailAlert } from "../services/email.service";
 import { sendDailyRiskReport } from "../services/dailyReport.service";
 import { pool } from "../db";
 
@@ -18,6 +13,22 @@ alertsRouter.post("/run-email", async (req, res) => {
     const minRisk = (req.body?.minRisk as "High" | "Extreme") ?? "High";
     const extraTo = Array.isArray(req.body?.extraTo) ? req.body.extraTo : [];
     const iotNote = req.body?.note as string | undefined;
+
+    // Check predictions exist first
+    const { rows: predRows } = await pool.query(
+      `SELECT COUNT(*) AS cnt FROM fire_risk_predictions
+       WHERE latitude=$1 AND longitude=$2 AND date>=CURRENT_DATE`,
+      [config.latitude, config.longitude],
+    ).catch(() => ({ rows: [{ cnt: "0" }] }));
+
+    if (Number(predRows[0]?.cnt) === 0) {
+      return res.json({
+        ok:      true,
+        sent:    false,
+        message: "No predictions in database. Run ML Prediction first (Quick Actions → Run ML Prediction).",
+        hint:    "POST /api/ml/predict-forecast",
+      });
+    }
 
     const result = await runRiskEmailAlerts({
       latitude:     config.latitude,
@@ -35,7 +46,6 @@ alertsRouter.post("/run-email", async (req, res) => {
 });
 
 // ── POST /api/alerts/run-extreme ───────────────────────────────────────────
-// Manually trigger an Extreme-only alert check
 alertsRouter.post("/run-extreme", async (_req, res) => {
   try {
     const result = await runRiskEmailAlerts({
@@ -51,7 +61,6 @@ alertsRouter.post("/run-extreme", async (_req, res) => {
 });
 
 // ── POST /api/alerts/daily-report ─────────────────────────────────────────
-// Manually trigger the full daily report (all risk levels)
 alertsRouter.post("/daily-report", async (_req, res) => {
   try {
     const result = await sendDailyRiskReport();
@@ -94,6 +103,9 @@ alertsRouter.get("/status", async (_req, res) => {
       })),
     });
   } catch (e: any) {
+    if (e.message?.includes("does not exist")) {
+      return res.json({ ok: true, location: config.locationKey, total: 0, highRiskDays: 0, alertNeeded: false, predictions: [] });
+    }
     res.status(500).json({ ok: false, error: e.message });
   }
 });
@@ -102,31 +114,19 @@ alertsRouter.get("/status", async (_req, res) => {
 alertsRouter.get("/history", async (req, res) => {
   try {
     const limit = Math.min(Number(req.query.limit ?? 20), 100);
-
     const { rows } = await pool.query(
       `SELECT id, location_key, risk_label, alert_date, message, created_at
-       FROM alert_logs
-       ORDER BY created_at DESC
-       LIMIT $1`,
+       FROM alert_logs ORDER BY created_at DESC LIMIT $1`,
       [limit],
     );
-
     res.json({
       ok:    true,
       count: rows.length,
-      data:  rows.map((r) => ({
-        ...r,
-        alert_date: String(r.alert_date).slice(0, 10),
-      })),
+      data:  rows.map((r) => ({ ...r, alert_date: String(r.alert_date).slice(0, 10) })),
     });
   } catch (e: any) {
     if (e.message?.includes("does not exist")) {
-      return res.json({
-        ok:    true,
-        count: 0,
-        data:  [],
-        note:  "Run sql/create_tables.sql first to create the alert_logs table.",
-      });
+      return res.json({ ok: true, count: 0, data: [], note: "Run sql/create_tables.sql first." });
     }
     res.status(500).json({ ok: false, error: e.message });
   }
@@ -146,65 +146,36 @@ alertsRouter.post("/test-email", async (_req, res) => {
         `Coords   : lat=${config.latitude}, lon=${config.longitude}`,
         `SMTP Host: ${config.smtp.host}`,
         "",
-        "Wildfire Risk Monitoring System",
+        "वन दृष्टि — Wildfire Risk Monitoring System",
       ].join("\n"),
     );
-
-    res.json({
-      ok:      true,
-      message: "Test email sent successfully.",
-      to:      config.smtp.to,
-    });
+    res.json({ ok: true, message: "Test email sent successfully.", to: config.smtp.to });
   } catch (e: any) {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
 
-/// ── POST /api/alerts/test-extreme ─────────────────────────────────────────
+// ── POST /api/alerts/test-extreme ─────────────────────────────────────────
 alertsRouter.post("/test-extreme", async (_req, res) => {
   try {
-    // ❌ Remove this dynamic import line entirely
-    // const { buildFireAlertHtml, buildFireAlertText, sendFireAlert } = await import("../services/email.service");
-
+    const { buildFireAlertHtml, buildFireAlertText, sendFireAlert } = await import("../services/email.service");
     const mockDays = [
-      {
-        date: new Date().toISOString().slice(0, 10),
-        risk_label: "Extreme",
-        risk_probability: 0.94,
-      },
-      {
-        date: new Date(Date.now() + 86400000).toISOString().slice(0, 10),
-        risk_label: "Extreme",
-        risk_probability: 0.88,
-      },
+      { date: new Date().toISOString().slice(0, 10),                             risk_label: "Extreme", risk_probability: 0.94 },
+      { date: new Date(Date.now() + 86400000).toISOString().slice(0, 10),       risk_label: "Extreme", risk_probability: 0.88 },
     ];
-
-    const emailArgs = {
-      location:  config.locationKey,
-      latitude:  config.latitude,
-      longitude: config.longitude,
-      threshold: "Extreme" as const,
-      highDays:  mockDays,
-    };
-
+    const emailArgs = { location: config.locationKey, latitude: config.latitude, longitude: config.longitude, threshold: "Extreme" as const, highDays: mockDays };
     const result = await sendFireAlert({
       subject: `🔴 [TEST] EXTREME Fire Risk Alert — ${config.locationKey}`,
       html:    buildFireAlertHtml(emailArgs),
       text:    buildFireAlertText(emailArgs),
     });
-
-    res.json({
-      ok:      true,
-      message: "Test EXTREME alert email sent.",
-      ...result,
-    });
+    res.json({ ok: true, message: "Test EXTREME alert email sent.", ...result });
   } catch (e: any) {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
 
 // ── POST /api/alerts/test-daily-report ────────────────────────────────────
-// Send a test daily report email right now
 alertsRouter.post("/test-daily-report", async (_req, res) => {
   try {
     const result = await sendDailyRiskReport();
@@ -227,29 +198,12 @@ alertsRouter.post("/iot-fire", async (req, res) => {
     } = req.body ?? {};
 
     const result = await sendIoTFireAlert({
-      deviceId,
-      deviceName,
-      location,
-      smokePpm:     Number(smokePpm),
-      temperature:  Number(temperature),
+      deviceId, deviceName, location,
+      smokePpm:    Number(smokePpm),
+      temperature: Number(temperature),
       fireDetected: Boolean(fireDetected),
     });
-
     res.json(result);
-  } catch (e: any) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-// ── POST /api/alerts/test-extreme ─────────────────────────────────────────
-alertsRouter.post("/test-extreme", async (_req, res) => {
-  try {
-    const result = await runRiskEmailAlerts({
-      latitude:     config.latitude,
-      longitude:    config.longitude,
-      location_key: config.locationKey,
-      minRisk:      "Extreme",
-    });
-    res.json({ ok: true, message: "Test extreme alert triggered.", ...result });
   } catch (e: any) {
     res.status(500).json({ ok: false, error: e.message });
   }
