@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import logo from "../assets/logo.png";
 
-import { API } from "../api";
+import { api } from "../api";
 
 const RISK_COLOR: Record<string, string> = { Low: "#9DC88D", Moderate: "#F1B24A", High: "#ff8c42", Extreme: "#ff4d4d" };
 const RISK_BG:    Record<string, string> = { Low: "rgba(157,200,141,0.15)", Moderate: "rgba(241,178,74,0.15)", High: "rgba(255,140,66,0.15)", Extreme: "rgba(255,77,77,0.15)" };
@@ -138,11 +138,11 @@ export default function Alerts() {
   const fetchData = async () => {
     try {
       const [histRes, predRes] = await Promise.all([
-        fetch(`${API}/api/alerts/history?limit=50`),
-        fetch(`${API}/api/ml/predictions?limit=7`),
+        api.alerts.history(50),
+        api.ml.predictions(7),
       ]);
-      if (histRes.ok) { const h = await histRes.json(); setHistory(h.data || []); }
-      if (predRes.ok) { const p = await predRes.json(); setPreds(p.data || []); }
+      setHistory(histRes.data || []);
+      setPreds(predRes.data || []);
       setLastRefresh(new Date().toLocaleTimeString());
     } catch { addToast("Failed to fetch — check backend", "error"); }
     finally { setLoading(false); }
@@ -154,17 +154,16 @@ export default function Alerts() {
   const sendAlert = async (minRisk: "High" | "Extreme", label: string) => {
     setSending(label);
     try {
-      const res  = await fetch(`${API}/api/alerts/run-email`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ minRisk }) });
-      const data = await res.json();
+      const data = await api.alerts.runEmail(minRisk);
       if (data.sent) { addToast(`✅ ${label} alert sent — ${data.alerts} day(s)`, "success"); if (soundEnabled) playRiskSound(minRisk); await fetchData(); }
       else { addToast(`ℹ️ ${data.message}`, "info"); }
     } catch { addToast(`Failed to send ${label} alert`, "error"); }
     finally { setSending(null); }
   };
 
-  const sendTestEmail   = async () => { setSending("test"); try { const res = await fetch(`${API}/api/alerts/test-email`, { method: "POST" }); const data = await res.json(); if (data.ok) { addToast("Test email sent!", "success"); if (soundEnabled) playRiskSound("Low"); } else throw new Error(data.error); } catch { addToast("Test email failed", "error"); } finally { setSending(null); } };
-  const sendTestExtreme = async () => { setSending("test-extreme"); try { const res = await fetch(`${API}/api/alerts/test-extreme`, { method: "POST" }); const data = await res.json(); if (data.ok) { addToast("🔴 Test EXTREME alert sent!", "success"); if (soundEnabled) playRiskSound("Extreme"); } else throw new Error(data.error); } catch { addToast("Test extreme failed", "error"); } finally { setSending(null); } };
-  const sendDailyReport = async () => { setSending("daily"); try { const res = await fetch(`${API}/api/alerts/daily-report`, { method: "POST" }); const data = await res.json(); if (data.ok && data.sent) { addToast(`Daily report sent — ${data.riskLevel}`, "success"); if (soundEnabled) playRiskSound(data.riskLevel ?? "Low"); } else { addToast(data.message ?? "No predictions", "info"); } } catch { addToast("Daily report failed", "error"); } finally { setSending(null); } };
+  const sendTestEmail   = async () => { setSending("test"); try { const data = await api.alerts.testEmail(); if (data.ok) { addToast("Test email sent!", "success"); if (soundEnabled) playRiskSound("Low"); } else throw new Error(data.message ?? "Test failed"); } catch { addToast("Test email failed", "error"); } finally { setSending(null); } };
+  const sendTestExtreme = async () => { setSending("test-extreme"); try { const data = await api.alerts.testExtreme(); if (data.ok) { addToast("🔴 Test EXTREME alert sent!", "success"); if (soundEnabled) playRiskSound("Extreme"); } else throw new Error(data.message ?? "Test failed"); } catch { addToast("Test extreme failed", "error"); } finally { setSending(null); } };
+  const sendDailyReport = async () => { setSending("daily"); try { const data = await api.alerts.dailyReport(); if (data.ok && data.sent) { addToast(`Daily report sent — ${data.riskLevel}`, "success"); if (soundEnabled) playRiskSound(data.riskLevel ?? "Low"); } else { addToast(data.message ?? "No predictions", "info"); } } catch { addToast("Daily report failed", "error"); } finally { setSending(null); } };
 
   const worstPred   = preds.find(p => p.risk_label === "Extreme") ?? preds.find(p => p.risk_label === "High");
   const extremeDays = preds.filter(p => p.risk_label === "Extreme").length;

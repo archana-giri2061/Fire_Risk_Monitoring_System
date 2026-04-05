@@ -6,7 +6,7 @@ import {
   Activity, LayoutDashboard, Menu, X, Wifi, Flame,
 } from "lucide-react";
 import logo from "../assets/logo.png";
-import { API } from "../api";
+import { api } from "../api";
 
 const RISK_COLOR: Record<string, string> = { Low: "#9DC88D", Moderate: "#F1B24A", High: "#ff8c42", Extreme: "#ff4d4d" };
 const RISK_BG:    Record<string, string> = { Low: "rgba(157,200,141,0.15)", Moderate: "rgba(241,178,74,0.15)", High: "rgba(255,140,66,0.15)", Extreme: "rgba(255,77,77,0.15)" };
@@ -68,11 +68,11 @@ export default function Forecast() {
   const fetchData = async () => {
     try {
       const [predRes, histRes] = await Promise.all([
-        fetch(`${API}/api/ml/predictions?limit=7`),
-        fetch(`${API}/api/alerts/history?limit=20`),
+        api.ml.predictions(7),
+        api.alerts.history(20),
       ]);
-      if (predRes.ok) { const p = await predRes.json(); setPreds(p.data || []); }
-      if (histRes.ok) { const h = await histRes.json(); setHistory(h.data || []); }
+      setPreds(predRes.data || []);
+      setHistory(histRes.data || []);
       setLastRefresh(new Date().toLocaleTimeString());
     } catch { /**/ }
     finally { setLoading(false); }
@@ -81,8 +81,7 @@ export default function Forecast() {
   const triggerAlert = async () => {
     setRunning(true); setAlertMsg("");
     try {
-      const res  = await fetch(`${API}/api/alerts/run-email`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ minRisk: "High" }) });
-      const data = await res.json();
+      const data = await api.alerts.runEmail("High");
       setAlertMsg(data.sent ? `✅ Alert sent — ${data.alerts} high-risk day(s)` : `ℹ️ ${data.message}`);
       await fetchData();
     } catch { setAlertMsg("❌ Failed to send alert"); }
@@ -92,9 +91,8 @@ export default function Forecast() {
   const runPrediction = async () => {
     setRunning(true); setAlertMsg("Running ML prediction…");
     try {
-      const res  = await fetch(`${API}/api/ml/predict-forecast`, { method: "POST" });
-      const data = await res.json();
-      setAlertMsg(data.ok ? "✅ Prediction complete! Forecast updated." : `❌ ${data.stderr || data.error}`);
+      const data = await api.ml.predictForecast();
+      setAlertMsg(data.ok ? "✅ Prediction complete! Forecast updated." : `❌ ${data.message ?? "Prediction failed"}`);
       await fetchData();
     } catch { setAlertMsg("❌ Failed to run prediction"); }
     finally { setRunning(false); }
