@@ -112,6 +112,93 @@ app.get("/check", (_req, res) => {
   });
 });
 
+// ── DB Status endpoint ────────────────────────────────────────────────────
+app.get("/api/db-status", async (_req, res) => {
+  try {
+    const { pool } = await import("./db");
+
+    // Check each table
+    const tables = [
+      "daily_weather",
+      "daily_weather_forecast",
+      "fire_risk_predictions",
+      "iot_sensor_readings",
+      "alert_logs",
+    ];
+
+    const result: Record<string, any> = {};
+
+    for (const table of tables) {
+      try {
+        const r = await pool.query(
+          `SELECT COUNT(*) AS cnt, MAX(created_at) AS last_row
+           FROM ${table}` 
+        );
+        result[table] = {
+          exists: true,
+          rows:   Number(r.rows[0].cnt),
+          latest: r.rows[0].last_row ?? "n/a",
+        };
+      } catch {
+        try {
+          // Some tables use different timestamp column
+          const r2 = await pool.query(`SELECT COUNT(*) AS cnt FROM ${table}`);
+          result[table] = { exists: true, rows: Number(r2.rows[0].cnt), latest: "n/a" };
+        } catch {
+          result[table] = { exists: false, rows: 0 };
+        }
+      }
+    }
+
+    // Latest sensor readings per device
+    let sensorSummary: any[] = [];
+    try {
+      const sr = await pool.query(`
+        SELECT device_id, sensor_type, value, unit, measured_at
+        FROM iot_sensor_readings
+        ORDER BY measured_at DESC
+        LIMIT 20
+      `);
+      sensorSummary = sr.rows;
+    } catch { /**/ }
+
+    // Latest predictions
+    let predictions: any[] = [];
+    try {
+      const pr = await pool.query(`
+        SELECT date, risk_label, risk_probability, created_at
+        FROM fire_risk_predictions
+        ORDER BY date DESC
+        LIMIT 7
+      `);
+      predictions = pr.rows;
+    } catch { /**/ }
+
+    // Latest weather
+    let weather: any[] = [];
+    try {
+      const wr = await pool.query(`
+        SELECT date, temp_mean, humidity_mean, wind_speed_max, data_source
+        FROM daily_weather
+        ORDER BY date DESC
+        LIMIT 5
+      `);
+      weather = wr.rows;
+    } catch { /**/ }
+
+    res.json({
+      ok: true,
+      timestamp: new Date().toISOString(),
+      tables: result,
+      latest_sensor_readings: sensorSummary,
+      latest_predictions: predictions,
+      latest_weather: weather,
+    });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ── Routes ─────────────────────────────────────────────────────────────────
 app.use("/api/weather",   weatherRouter);
 app.use("/api/sensor",    sensorRouter);
