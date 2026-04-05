@@ -112,7 +112,7 @@ export default function IoTMonitor() {
     const byTypeBool: Record<string, boolean> = {};
     rows.forEach(r => {
       const t = r.sensor_type.toLowerCase();
-      byType[t] = r.value;
+      byType[t] = r.value; byType[r.sensor_type] = r.value; // store both cases
       if (r.fire_detected !== undefined) byTypeBool["fire"] = r.fire_detected;
       if (r.is_raining    !== undefined) byTypeBool["rain"] = r.is_raining;
       if (r.soil_dry      !== undefined) byTypeBool["soil_dry"] = r.soil_dry;
@@ -121,9 +121,9 @@ export default function IoTMonitor() {
     const temp     = byType["temperature"] ?? byType["temp"] ?? rows[0]?.temperature ?? 0;
     const hum      = byType["humidity"]    ?? byType["hum"]  ?? rows[0]?.humidity    ?? 0;
     const co2      = byType["co2"]                           ?? rows[0]?.co2_ppm     ?? 400;
-    const smoke    = byType["smoke"]       ?? co2;
-    const rain     = byType["rain"]        ?? byType["rainfall"] ?? rows[0]?.rain_value ?? 1023;
-    const soil     = byType["soil"]        ?? byType["moisture"] ?? rows[0]?.soil_moisture ?? 50;
+    const smoke = byType["smoke"] ?? byType["SMOKE"] ?? byType["mq135"] ?? co2;
+    const rain  = byType["rain"] ?? byType["RAIN"] ?? byType["rainfall"] ?? byType["yl83"] ?? rows[0]?.rain_value ?? 1023;
+    const soil  = byType["soil"] ?? byType["SOIL"] ?? byType["moisture"] ?? byType["soil_moisture"] ?? rows[0]?.soil_moisture ?? 50;
     const fireFlag = byTypeBool["fire"] ?? rows[0]?.fire_detected ?? (smoke > 300 || co2 > 800);
     const rainFlag = byTypeBool["rain"] ?? rain < 500;
     const soilDry  = byTypeBool["soil_dry"] ?? soil < 20;

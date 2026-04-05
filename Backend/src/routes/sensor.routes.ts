@@ -83,8 +83,20 @@ async function getAllReadings(req: any, res: any) {
     const data = rows.map((r) => {
       const v = Number(r.value);
       const t = r.sensor_type.toLowerCase();
+      // Normalize sensor_type names to standard lowercase
+      const normalizedType = (
+        t === "temp"     ? "temperature" :
+        t === "hum"      ? "humidity" :
+        t === "co2"      ? "co2" :
+        t === "rain"     ? "rain" :
+        t === "soil"     ? "soil" :
+        t === "smoke"    ? "smoke" :
+        t === "fire"     ? "fire" :
+        t
+      );
       return {
         ...r,
+        sensor_type: normalizedType,
         recorded_at:   r.measured_at ?? r.recorded_at,
         // DHT22 — temperature & humidity
         temperature:   t === "temperature" || t === "temp"     ? v : null,
