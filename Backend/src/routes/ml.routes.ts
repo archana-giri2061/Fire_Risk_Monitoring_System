@@ -204,3 +204,41 @@ mlRouter.post("/run-all", async (_req, res) => {
     res.status(500).json({ ok: false, error: e.message, results });
   }
 });
+
+/**
+ * GET /api/ml/test-run
+ * Runs full pipeline and returns complete stdout+stderr for debugging.
+ * Visit this URL in browser to see exactly what's failing.
+ */
+mlRouter.get("/test-run", async (_req, res) => {
+  const log: Record<string, any> = {};
+  try {
+    log.env = {
+      DATABASE_URL: process.env.DATABASE_URL ? "SET ✅" : "MISSING ❌",
+      LATITUDE:     process.env.LATITUDE,
+      LONGITUDE:    process.env.LONGITUDE,
+      platform:     process.platform,
+      cwd:          process.cwd(),
+    };
+
+    console.log("[test-run] Starting train…");
+    const train = await runPython("ml/scripts/train_model.py");
+    log.train = { code: train.code, stdout: train.stdout.slice(-1500), stderr: train.stderr.slice(-1000) };
+
+    if (train.code !== 0) {
+      return res.status(200).json({ ok: false, failedAt: "train", log });
+    }
+
+    console.log("[test-run] Starting predict…");
+    const predict = await runPython("ml/scripts/predict_forecast.py");
+    log.predict = { code: predict.code, stdout: predict.stdout.slice(-1500), stderr: predict.stderr.slice(-1000) };
+
+    if (predict.code !== 0) {
+      return res.status(200).json({ ok: false, failedAt: "predict", log });
+    }
+
+    res.json({ ok: true, message: "Pipeline succeeded!", log });
+  } catch (e: any) {
+    res.status(200).json({ ok: false, error: e.message, log });
+  }
+});

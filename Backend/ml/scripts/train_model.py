@@ -62,10 +62,10 @@ def main():
     out_dir = Path("ml/outputs")
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print(" Loading training data from:", EXCEL_PATH)
+    print(f" Loading training data from: {EXCEL_PATH}")
     df = load_excel_daily(EXCEL_PATH)
     print(f" Daily rows loaded: {len(df)}")
-    print("   Risk distribution:\n", df["risk_code"].value_counts().sort_index())
+    print("  Risk distribution:\n", df["risk_code"].value_counts().sort_index())
 
     if df["risk_code"].nunique() < 2:
         raise ValueError("Not enough risk classes for training.")
@@ -77,6 +77,7 @@ def main():
         X, y, test_size=0.2, random_state=42, stratify=y
     )
 
+    # NOTE: use_label_encoder was removed in XGBoost 2.0 — do NOT include it
     model = XGBClassifier(
         n_estimators=300,
         max_depth=6,
@@ -88,7 +89,6 @@ def main():
         objective="multi:softmax",
         num_class=4,
         eval_metric="mlogloss",
-        use_label_encoder=False,
         random_state=42,
     )
 
@@ -101,22 +101,22 @@ def main():
     report = classification_report(y_val, pred, digits=4, output_dict=True)
 
     print(f"\n Validation Accuracy : {acc:.4f}")
-    print("   Confusion Matrix:\n", cm)
+    print("  Confusion Matrix:\n", cm)
     print("\n", classification_report(y_val, pred, digits=4))
 
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     cv_scores = cross_val_score(model, X, y, cv=cv, scoring="accuracy")
-    print(f"   5-fold CV accuracy : {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
+    print(f"  5-fold CV accuracy : {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
 
     metrics = {
-        "validation_accuracy": float(acc),
-        "cv_accuracy_mean":    float(cv_scores.mean()),
-        "cv_accuracy_std":     float(cv_scores.std()),
-        "confusion_matrix":    cm.tolist(),
+        "validation_accuracy":   float(acc),
+        "cv_accuracy_mean":      float(cv_scores.mean()),
+        "cv_accuracy_std":       float(cv_scores.std()),
+        "confusion_matrix":      cm.tolist(),
         "classification_report": report,
-        "features":            FEATURES,
-        "model":               "XGBoost",
-        "num_training_samples": len(df),
+        "features":              FEATURES,
+        "model":                 "XGBoost",
+        "num_training_samples":  len(df),
     }
 
     with open(out_dir / "metrics_train.json", "w", encoding="utf-8") as f:
@@ -128,6 +128,7 @@ def main():
     Path(MODEL_PATH).parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, MODEL_PATH)
     print(f"\n Model saved to: {MODEL_PATH}")
+    print(" Training complete!")
 
 
 if __name__ == "__main__":

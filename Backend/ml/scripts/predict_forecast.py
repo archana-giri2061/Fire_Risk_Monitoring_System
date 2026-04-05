@@ -2,8 +2,9 @@
 predict_forecast.py
 ===================
 Loads 7-day forecast from DB, predicts fire risk, stores results.
+Exits with code 1 on any real failure so the Node route detects it.
 """
-
+import sys
 import joblib
 import pandas as pd
 from pathlib import Path
@@ -48,10 +49,48 @@ def load_forecast(engine) -> pd.DataFrame:
 
     mask = df["temp_mean"].isna()
     df.loc[mask, "temp_mean"] = (df.loc[mask, "temp_max"] + df.loc[mask, "temp_min"]) / 2.0
-
     df["precipitation_sum"] = pd.to_numeric(df["precipitation_sum"], errors="coerce").fillna(0)
     df["wind_speed_max"]    = pd.to_numeric(df["wind_speed_max"],    errors="coerce").fillna(0)
+    df = df.dropna(subset=FEATURES)
+    return df
 
+
+def load_archive_as_fallback(engine) -> pd.DataFrame:
+    """Use recent archive weather if forecast table is empty."""
+    print(" Forecast table empty — falling back to archive weather for prediction…")
+    q = text("""
+        SELECT date,
+               COALESCE(latitude,  :lat) AS latitude,
+               COALESCE(longitude, :lon) AS longitude,
+               temp_max, temp_min, temp_mean,
+               humidity_mean, precipitation_sum, wind_speed_max
+        FROM daily_weather
+        WHERE latitude  IS NOT DISTINCT FROM :lat
+           OR location_key IS NOT NULL
+        ORDER BY date DESC
+        LIMIT 7
+    """)
+    df = pd.read_sql(q, engine, params={"lat": LATITUDE, "lon": LONGITUDE})
+    if df.empty:
+        # Last resort: query without lat filter
+        q2 = text("""
+            SELECT date,
+                   :lat  AS latitude,
+                   :lon  AS longitude,
+                   temp_max, temp_min, temp_mean,
+                   humidity_mean, precipitation_sum, wind_speed_max
+            FROM daily_weather
+            ORDER BY date DESC LIMIT 7
+        """)
+        df = pd.read_sql(q2, engine, params={"lat": LATITUDE, "lon": LONGITUDE})
+
+    df["date"] = pd.to_datetime(df["date"]).dt.date
+    df["latitude"]  = LATITUDE
+    df["longitude"] = LONGITUDE
+    df["precipitation_sum"] = pd.to_numeric(df["precipitation_sum"], errors="coerce").fillna(0)
+    df["wind_speed_max"]    = pd.to_numeric(df["wind_speed_max"],    errors="coerce").fillna(0)
+    mask = df["temp_mean"].isna()
+    df.loc[mask, "temp_mean"] = (df.loc[mask, "temp_max"] + df.loc[mask, "temp_min"]) / 2.0
     df = df.dropna(subset=FEATURES)
     return df
 
@@ -95,17 +134,21 @@ def main():
     df = load_forecast(engine)
 
     if df.empty:
-        print("No forecast data found. Run weather sync first.")
-        return
+        # Try fallback to archive data
+        df = load_archive_as_fallback(engine)
 
-    print(f"Forecast rows: {len(df)}")
+    if df.empty:
+        print("ERROR: No weather data available in DB.")
+        print("Fix: Run POST /api/weather/sync-all first, then retry.")
+        sys.exit(1)   # ← exit code 1 so Node route reports the error
+
+    print(f" Using {len(df)} rows for prediction")
 
     model = joblib.load(MODEL_PATH)
-    print(f"Model loaded from: {MODEL_PATH}")
+    print(f" Model loaded from: {MODEL_PATH}")
 
     X    = df[FEATURES]
     pred = model.predict(X)
-
     proba = model.predict_proba(X).max(axis=1) if hasattr(model, "predict_proba") else [0.0] * len(df)
 
     out = df[["date", "latitude", "longitude"]].copy()
@@ -113,13 +156,13 @@ def main():
     out["risk_label"]       = out["risk_code"].apply(code_to_label)
     out["risk_probability"] = proba
 
-    print("\n Upcoming Forecast Risk:")
+    print("\n Upcoming Fire Risk Forecast:")
     print(out[["date", "risk_label", "risk_code", "risk_probability"]].to_string(index=False))
 
     out.to_csv(out_dir / "forecast_predictions.csv", index=False)
 
     stored = upsert_predictions(engine, out)
-    print(f"\n Stored {stored} predictions in database")
+    print(f"\n Stored {stored} predictions in database ✅")
 
     alert_days = out[out["risk_code"].isin({2, 3})]
     if not alert_days.empty:
@@ -127,7 +170,7 @@ def main():
         for _, a in alert_days.iterrows():
             print(f"   {a['date']} | {a['risk_label']} | prob={a['risk_probability']:.2f}")
     else:
-        print("\n No high-risk days in 7-day forecast.")
+        print("\n No high-risk days in forecast.")
 
 
 if __name__ == "__main__":
