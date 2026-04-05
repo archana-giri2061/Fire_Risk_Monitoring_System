@@ -63,8 +63,20 @@ app.use((req, res) => {
 function runPython(scriptRelPath: string): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const scriptPath = path.resolve(process.cwd(), scriptRelPath);
-    const p = spawn("python", ["-u", scriptPath], {
-      env: { ...process.env, PYTHONIOENCODING: "utf-8" }, cwd: process.cwd(),
+    const cmd = process.platform === "win32" ? "python" : "python3";
+    const p = spawn(cmd, ["-u", scriptPath], {
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: "utf-8",
+        PYTHONUNBUFFERED: "1",
+        DATABASE_URL:  process.env.DATABASE_URL  ?? "",
+        LATITUDE:      process.env.LATITUDE      ?? "28.002",
+        LONGITUDE:     process.env.LONGITUDE     ?? "83.036",
+        LOCATION_KEY:  process.env.LOCATION_KEY  ?? "lumbini_28.002_83.036",
+        EXCEL_PATH:    process.env.EXCEL_PATH     ?? "ml/data/ForestfireData.xlsx",
+        MODEL_PATH:    process.env.MODEL_PATH     ?? "ml/models/fire_risk_model_lr.joblib",
+      },
+      cwd: process.cwd(),
     });
     let stdout = "", stderr = "";
     p.stdout.on("data", (d) => (stdout += d.toString()));

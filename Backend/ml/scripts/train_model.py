@@ -77,7 +77,6 @@ def main():
         X, y, test_size=0.2, random_state=42, stratify=y
     )
 
-    # NOTE: use_label_encoder was removed in XGBoost 2.0 — do NOT include it
     model = XGBClassifier(
         n_estimators=300,
         max_depth=6,
