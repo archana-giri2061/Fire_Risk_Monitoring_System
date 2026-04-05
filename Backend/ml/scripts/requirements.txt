@@ -1,9 +1,12 @@
+fastapi
+uvicorn[standard]
+asyncpg
+httpx
+python-dotenv
+pydantic
 joblib
 pandas
 scikit-learn
 xgboost
-sqlalchemy
 openpyxl
-psycopg2-binary
-python-dotenv
-numpy
+sqlalchemy
