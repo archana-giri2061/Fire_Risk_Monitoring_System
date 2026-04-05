@@ -4,7 +4,7 @@
   "main": "dist/app.js",
   "scripts": {
     "dev": "ts-node-dev --respawn src/app.ts",
-    "build": "pip3 install -r ml/scripts/requirements.txt && tsc",
+    "build": "python3 -m pip install -r ml/scripts/requirements.txt --break-system-packages --quiet && tsc",
     "start": "node dist/app.js"
   },
   "keywords": [],

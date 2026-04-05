@@ -8,74 +8,76 @@ import { autoAlertAfterPrediction } from "../services/alertEngine.service";
 
 export const mlRouter = Router();
 
-// ── Python runner — tries python3 first, falls back to python ──────────────
+/**
+ * Run a Python script using "python3 -m runpy <script>" approach
+ * This ensures the same Python environment (with installed packages) is used
+ * regardless of venv vs system Python on Render.
+ */
 function runPython(
   scriptRelPath: string,
   args: string[] = [],
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const scriptPath = path.resolve(process.cwd(), scriptRelPath);
+    const env = {
+      ...process.env,
+      PYTHONIOENCODING: "utf-8",
+      PYTHONUNBUFFERED: "1",
+      DATABASE_URL:    process.env.DATABASE_URL     ?? "",
+      LATITUDE:        process.env.LATITUDE         ?? "28.002",
+      LONGITUDE:       process.env.LONGITUDE        ?? "83.036",
+      LOCATION_KEY:    process.env.LOCATION_KEY     ?? "lumbini_28.002_83.036",
+      EXCEL_PATH:      process.env.EXCEL_PATH       ?? "ml/data/ForestfireData.xlsx",
+      MODEL_PATH:      process.env.MODEL_PATH       ?? "ml/models/fire_risk_model_lr.joblib",
+    };
 
-    // On Render (Linux) it's "python3", on Windows it's "python"
-    const pythonCmd = process.platform === "win32" ? "python" : "python3";
+    // Try candidates in order until one works
+    const candidates = ["python3", "python", "/usr/bin/python3", "/usr/local/bin/python3"];
 
-    const p = spawn(pythonCmd, ["-u", scriptPath, ...args], {
-      env: {
-        ...process.env,
-        PYTHONIOENCODING: "utf-8",
-        PYTHONUNBUFFERED: "1",
-        // Explicitly forward these so Python scripts can always read them
-        DATABASE_URL:    process.env.DATABASE_URL     ?? "",
-        LATITUDE:        process.env.LATITUDE         ?? "28.002",
-        LONGITUDE:       process.env.LONGITUDE        ?? "83.036",
-        LOCATION_KEY:    process.env.LOCATION_KEY     ?? "lumbini_28.002_83.036",
-        EXCEL_PATH:      process.env.EXCEL_PATH       ?? "ml/data/ForestfireData.xlsx",
-        MODEL_PATH:      process.env.MODEL_PATH       ?? "ml/models/fire_risk_model_lr.joblib",
-      },
-      cwd: process.cwd(),
-    });
-
-    let stdout = "";
-    let stderr = "";
-    p.stdout.on("data", (d) => (stdout += d.toString()));
-    p.stderr.on("data", (d) => (stderr += d.toString()));
-    p.on("close", (code) => resolve({ code: code ?? 0, stdout, stderr }));
-    p.on("error", (err) => {
-      // If python3 not found, try python
-      if ((err as any).code === "ENOENT" && pythonCmd === "python3") {
-        const p2 = spawn("python", ["-u", scriptPath, ...args], {
-          env: { ...process.env, PYTHONIOENCODING: "utf-8" },
-          cwd: process.cwd(),
-        });
-        let o2 = "", e2 = "";
-        p2.stdout.on("data", (d) => (o2 += d.toString()));
-        p2.stderr.on("data", (d) => (e2 += d.toString()));
-        p2.on("close", (code2) => resolve({ code: code2 ?? 1, stdout: o2, stderr: e2 }));
-        p2.on("error", (err2) => resolve({ code: 1, stdout: "", stderr: `python not found: ${err2.message}` }));
-      } else {
-        resolve({ code: 1, stdout: "", stderr: `spawn error: ${err.message}` });
+    function tryNext(idx: number): void {
+      if (idx >= candidates.length) {
+        resolve({ code: 1, stdout: "", stderr: "No Python interpreter found. Tried: " + candidates.join(", ") });
+        return;
       }
-    });
+      const cmd = candidates[idx];
+      const p = spawn(cmd, ["-u", scriptPath, ...args], { env, cwd: process.cwd() });
+      let stdout = "", stderr = "";
+      p.stdout.on("data", (d) => (stdout += d.toString()));
+      p.stderr.on("data", (d) => (stderr += d.toString()));
+      p.on("close", (code) => {
+        // If script fails due to missing module, try next Python
+        if (code !== 0 && stderr.includes("ModuleNotFoundError")) {
+          console.warn(`[ML] ${cmd} missing modules, trying next…`);
+          tryNext(idx + 1);
+        } else {
+          resolve({ code: code ?? 0, stdout, stderr });
+        }
+      });
+      p.on("error", () => tryNext(idx + 1));
+    }
+
+    tryNext(0);
   });
 }
 
-// ── GET /api/ml/debug — check python + packages ───────────────────────────
+// ── GET /api/ml/debug ─────────────────────────────────────────────────────
 mlRouter.get("/debug", async (_req, res) => {
   try {
+    const checkScript = path.resolve(process.cwd(), "ml/scripts/check_env.py");
     const pythonCheck = await runPython("ml/scripts/check_env.py");
-    const scriptsExist = {
-      train:   fs.existsSync(path.resolve(process.cwd(), "ml/scripts/train_model.py")),
-      predict: fs.existsSync(path.resolve(process.cwd(), "ml/scripts/predict_forecast.py")),
-      model:   fs.existsSync(path.resolve(process.cwd(), "ml/models/fire_risk_model_lr.joblib")),
-      excel:   fs.existsSync(path.resolve(process.cwd(), "ml/data/ForestfireData.xlsx")),
-    };
     res.json({
       ok:           true,
       platform:     process.platform,
       cwd:          process.cwd(),
+      scriptExists: fs.existsSync(checkScript),
       pythonOutput: pythonCheck.stdout,
       pythonErrors: pythonCheck.stderr,
-      files:        scriptsExist,
+      files: {
+        train:   fs.existsSync(path.resolve(process.cwd(), "ml/scripts/train_model.py")),
+        predict: fs.existsSync(path.resolve(process.cwd(), "ml/scripts/predict_forecast.py")),
+        model:   fs.existsSync(path.resolve(process.cwd(), "ml/models/fire_risk_model_lr.joblib")),
+        excel:   fs.existsSync(path.resolve(process.cwd(), "ml/data/ForestfireData.xlsx")),
+      },
     });
   } catch (e: any) {
     res.status(500).json({ ok: false, error: e.message });
@@ -87,9 +89,9 @@ mlRouter.post("/train", async (_req, res) => {
   try {
     console.log("[ML] Starting training…");
     const r = await runPython("ml/scripts/train_model.py");
-    console.log("[ML] Train exit code:", r.code);
+    console.log("[ML] Train exit:", r.code);
     if (r.code !== 0) {
-      console.error("[ML] Train stderr:", r.stderr);
+      console.error("[ML] Train stderr:", r.stderr.slice(0, 500));
       return res.status(500).json({ ok: false, stderr: r.stderr, stdout: r.stdout });
     }
     res.json({ ok: true, message: "Model trained successfully", stdout: r.stdout });
@@ -115,9 +117,9 @@ mlRouter.post("/predict-forecast", async (_req, res) => {
   try {
     console.log("[ML] Starting prediction…");
     const r = await runPython("ml/scripts/predict_forecast.py");
-    console.log("[ML] Predict exit code:", r.code);
+    console.log("[ML] Predict exit:", r.code);
     if (r.code !== 0) {
-      console.error("[ML] Predict stderr:", r.stderr);
+      console.error("[ML] Predict stderr:", r.stderr.slice(0, 500));
       return res.status(500).json({ ok: false, stderr: r.stderr, stdout: r.stdout });
     }
     const alert = await autoAlertAfterPrediction();
@@ -127,35 +129,27 @@ mlRouter.post("/predict-forecast", async (_req, res) => {
   }
 });
 
-/** GET /api/ml/predictions?limit=7&from=2026-03-01 */
+/** GET /api/ml/predictions */
 mlRouter.get("/predictions", async (req, res) => {
   try {
     const limit = Math.min(Number(req.query.limit ?? 7), 30);
     const from  = req.query.from ? String(req.query.from) : null;
-
     const params: (string | number)[] = [config.latitude, config.longitude, limit];
     const dateFilter = from ? `AND date >= $4::date` : `AND date >= CURRENT_DATE`;
     if (from) params.push(from);
 
     const { rows } = await pool.query(
-      `SELECT date, latitude, longitude,
-              risk_code, risk_label,
-              COALESCE(risk_probability, 0) AS risk_probability,
+      `SELECT date, latitude, longitude, risk_code, risk_label,
+              COALESCE(risk_probability,0) AS risk_probability,
               model_name, created_at
        FROM fire_risk_predictions
-       WHERE latitude  = $1
-         AND longitude = $2
-         ${dateFilter}
-       ORDER BY date ASC
-       LIMIT $3`,
+       WHERE latitude=$1 AND longitude=$2 ${dateFilter}
+       ORDER BY date ASC LIMIT $3`,
       params,
     );
-
     res.json({
-      ok:       true,
-      count:    rows.length,
-      location: config.locationKey,
-      data: rows.map((r) => ({
+      ok: true, count: rows.length, location: config.locationKey,
+      data: rows.map(r => ({
         date:             String(r.date).slice(0, 10),
         risk_code:        r.risk_code,
         risk_label:       r.risk_label,
@@ -165,10 +159,8 @@ mlRouter.get("/predictions", async (req, res) => {
       })),
     });
   } catch (e: any) {
-    // If table doesn't exist yet return empty
-    if (e.message?.includes("does not exist")) {
+    if (e.message?.includes("does not exist"))
       return res.json({ ok: true, count: 0, location: config.locationKey, data: [] });
-    }
     res.status(500).json({ ok: false, error: e.message });
   }
 });
@@ -176,43 +168,36 @@ mlRouter.get("/predictions", async (req, res) => {
 /** GET /api/ml/metrics */
 mlRouter.get("/metrics", async (_req, res) => {
   try {
-    const read = (filename: string) => {
-      const p = path.resolve(process.cwd(), "ml/outputs", filename);
-      if (!fs.existsSync(p)) return null;
-      return JSON.parse(fs.readFileSync(p, "utf-8"));
+    const read = (f: string) => {
+      const p = path.resolve(process.cwd(), "ml/outputs", f);
+      return fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf-8")) : null;
     };
-    res.json({
-      ok:      true,
-      train:   read("metrics_train.json"),
-      archive: read("metrics_archive.json"),
-    });
+    res.json({ ok: true, train: read("metrics_train.json"), archive: read("metrics_archive.json") });
   } catch (e: any) {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
 
-/** POST /api/ml/run-all — train → test → predict → alert */
+/** POST /api/ml/run-all */
 mlRouter.post("/run-all", async (_req, res) => {
   const results: Record<string, any> = {};
   try {
-    const steps: Array<[string, string]> = [
+    const steps: [string, string][] = [
       ["train",        "ml/scripts/train_model.py"],
       ["test_archive", "ml/scripts/test_with_archive.py"],
       ["predict",      "ml/scripts/predict_forecast.py"],
     ];
-
     for (const [key, script] of steps) {
-      console.log(`[ML run-all] Step: ${key}`);
+      console.log(`[ML run-all] ${key}…`);
       const r = await runPython(script);
-      results[key] = { code: r.code, stdout: r.stdout.slice(-800) };
+      results[key] = { code: r.code, stdout: r.stdout.slice(-600) };
       if (r.code !== 0) {
         results[key].stderr = r.stderr;
         console.error(`[ML run-all] ${key} failed:`, r.stderr.slice(0, 300));
         return res.status(500).json({ ok: false, failedStep: key, results });
       }
-      console.log(`[ML run-all] ${key} done`);
+      console.log(`[ML run-all] ${key} ✅`);
     }
-
     results["alert"] = await autoAlertAfterPrediction();
     res.json({ ok: true, message: "All ML steps completed", results });
   } catch (e: any) {
