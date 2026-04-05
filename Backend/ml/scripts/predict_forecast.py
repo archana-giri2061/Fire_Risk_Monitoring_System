@@ -24,9 +24,25 @@ CREATE TABLE IF NOT EXISTS fire_risk_predictions (
   risk_label       TEXT NOT NULL,
   risk_probability DOUBLE PRECISION DEFAULT 0,
   model_name       TEXT NOT NULL DEFAULT 'xgboost',
-  created_at       TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE (latitude, longitude, date, model_name)
+  created_at       TIMESTAMPTZ DEFAULT NOW()
 );
+"""
+
+# Add the UNIQUE constraint if it doesn't exist yet
+# (handles case where table was created without it)
+FIX_CONSTRAINT = """
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'fire_risk_predictions_lat_lon_date_model_key'
+      AND conrelid = 'fire_risk_predictions'::regclass
+  ) THEN
+    ALTER TABLE fire_risk_predictions
+      ADD CONSTRAINT fire_risk_predictions_lat_lon_date_model_key
+      UNIQUE (latitude, longitude, date, model_name);
+  END IF;
+END $$;
 """
 
 
@@ -129,6 +145,8 @@ def main():
 
     with engine.begin() as conn:
         conn.execute(text(CREATE_PRED_TABLE))
+        conn.execute(text(FIX_CONSTRAINT))
+    print(" Table ready with UNIQUE constraint ✅")
 
     print("Loading 7-day forecast …")
     df = load_forecast(engine)
