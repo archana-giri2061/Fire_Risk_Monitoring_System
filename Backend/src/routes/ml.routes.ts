@@ -24,6 +24,13 @@ function runPython(
         ...process.env,
         PYTHONIOENCODING: "utf-8",
         PYTHONUNBUFFERED: "1",
+        // Explicitly forward these so Python scripts can always read them
+        DATABASE_URL:    process.env.DATABASE_URL     ?? "",
+        LATITUDE:        process.env.LATITUDE         ?? "28.002",
+        LONGITUDE:       process.env.LONGITUDE        ?? "83.036",
+        LOCATION_KEY:    process.env.LOCATION_KEY     ?? "lumbini_28.002_83.036",
+        EXCEL_PATH:      process.env.EXCEL_PATH       ?? "ml/data/ForestfireData.xlsx",
+        MODEL_PATH:      process.env.MODEL_PATH       ?? "ml/models/fire_risk_model_lr.joblib",
       },
       cwd: process.cwd(),
     });
