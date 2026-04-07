@@ -72,6 +72,7 @@ async function sendViaSMTP(
     secure: false,
     auth:   { user: config.smtp.user, pass: config.smtp.pass },
     tls:    { rejectUnauthorized: false },
+    family: 4,   // force IPv4 — Render blocks IPv6 to Gmail
   });
 
   const info = await transporter.sendMail({
