@@ -66,13 +66,18 @@ async function sendViaSMTP(
     throw new Error("ALERT_TO_EMAIL not set — add to Render Environment");
   }
 
+  // Render blocks IPv6 — use direct IP for smtp.gmail.com
+  const smtpHost = config.smtp.host === "smtp.gmail.com" ? "64.233.184.108" : config.smtp.host;
+  console.log(`[SMTP] Connecting to ${smtpHost}:${config.smtp.port} (IPv4 forced)`);
+
   const transporter = nodemailer.createTransport({
-    host:   config.smtp.host,
-    port:   config.smtp.port,
-    secure: false,
-    auth:   { user: config.smtp.user, pass: config.smtp.pass },
-    tls:    { rejectUnauthorized: false },
-    family: 4,   // force IPv4 — Render blocks IPv6 to Gmail
+    host:         smtpHost,
+    port:         config.smtp.port,
+    secure:       false,
+    auth:         { user: config.smtp.user, pass: config.smtp.pass },
+    tls:          { rejectUnauthorized: false, servername: "smtp.gmail.com" },
+    socketTimeout: 30000,
+    greetingTimeout: 15000,
   });
 
   const info = await transporter.sendMail({
