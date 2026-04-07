@@ -1,3 +1,4 @@
+import { requireAdmin } from "../middleware/auth.middleware";
 import { Router } from "express";
 import { pool } from "../db";
 import { syncWeatherData } from "../services/WeatherSync.service";
@@ -16,7 +17,7 @@ weatherRouter.get("/db-test", async (_req, res) => {
 });
 
 /** POST /api/weather/sync-all */
-weatherRouter.post("/sync-all", async (_req, res) => {
+weatherRouter.post("/sync-all", requireAdmin, async (_req, res) => {
   try {
     const result = await syncWeatherData();
     res.json(result);

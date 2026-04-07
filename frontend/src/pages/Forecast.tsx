@@ -6,7 +6,8 @@ import {
   Activity, LayoutDashboard, Menu, X, Wifi, Flame,
 } from "lucide-react";
 import logo from "../assets/logo.png";
-import { api } from "../api";
+import { api, isAdmin, setAdminKey, getAdminKey, clearAdminKey } from "../api";
+import AdminLogin from "./AdminLogin";
 
 const RISK_COLOR: Record<string, string> = { Low: "#9DC88D", Moderate: "#F1B24A", High: "#ff8c42", Extreme: "#ff4d4d" };
 const RISK_BG:    Record<string, string> = { Low: "rgba(157,200,141,0.15)", Moderate: "rgba(241,178,74,0.15)", High: "rgba(255,140,66,0.15)", Extreme: "rgba(255,77,77,0.15)" };
@@ -63,7 +64,11 @@ export default function Forecast() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [expandedDay, setExpandedDay] = useState<number | null>(0);
   const [lastRefresh, setLastRefresh] = useState("");
+  const [adminKey, setAdminKeyState] = useState(getAdminKey());
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
   const isMobile = useIsMobile();
+  const handleAdminLogin = (key: string) => { setAdminKey(key); setAdminKeyState(key); setShowAdminLogin(false); };
+  const handleAdminLogout = () => { clearAdminKey(); setAdminKeyState(""); };
 
   const fetchData = async () => {
     try {
@@ -110,6 +115,15 @@ export default function Forecast() {
         <div style={{ width: 48, height: 48, borderRadius: "50%", border: "3px solid rgba(157,200,141,0.2)", borderTopColor: "#9DC88D", animation: "spin 0.9s linear infinite" }} />
         <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 14 }}>Loading forecast…</div>
       </div>
+      {showAdminLogin && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(6px)" }}>
+          <div style={{ background: "rgba(8,22,18,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 20, padding: "28px 24px", width: "100%", maxWidth: 380 }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "#fff", marginBottom: 6 }}>🔑 Admin Login</div>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 20 }}>Required to run predictions and send alerts</div>
+            <AdminLogin onLogin={handleAdminLogin} onCancel={() => setShowAdminLogin(false)} />
+          </div>
+        </div>
+      )}
       <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
     </div>
   );
@@ -129,8 +143,10 @@ export default function Forecast() {
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={fetchData} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", borderRadius: 999, background: "rgba(157,200,141,0.12)", border: "1px solid rgba(157,200,141,0.25)", color: "#9DC88D", fontWeight: 700, fontSize: 12, cursor: "pointer" }}><RefreshCw size={12} />{!isMobile && " Refresh"}</button>
-            <button onClick={runPrediction} disabled={running} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", borderRadius: 999, background: "rgba(241,178,74,0.15)", border: "1px solid rgba(241,178,74,0.3)", color: "#F1B24A", fontWeight: 700, fontSize: 12, cursor: running ? "not-allowed" : "pointer" }}>{running ? "Running…" : isMobile ? "⚡" : "Run Prediction"}</button>
-            <button onClick={triggerAlert} disabled={running} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", borderRadius: 999, background: "rgba(255,140,66,0.15)", border: "1px solid rgba(255,140,66,0.3)", color: "#ff8c42", fontWeight: 700, fontSize: 12, cursor: running ? "not-allowed" : "pointer" }}><Bell size={12} />{!isMobile && " Alert"}</button>
+            {adminKey ? <div style={{ padding: "8px 12px", borderRadius: 999, background: "rgba(241,178,74,0.12)", border: "1px solid rgba(241,178,74,0.3)", color: "#F1B24A", fontSize: 12, fontWeight: 600, cursor: "pointer" }} onClick={handleAdminLogout} title="Click to logout">🔑</div>
+            : <button onClick={() => setShowAdminLogin(true)} style={{ padding: "8px 12px", borderRadius: 999, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.4)", fontSize: 12, cursor: "pointer" }}>🔒</button>}
+            <button onClick={() => { if (!isAdmin()) { setShowAdminLogin(true); return; } runPrediction(); }} disabled={running} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", borderRadius: 999, background: "rgba(241,178,74,0.15)", border: "1px solid rgba(241,178,74,0.3)", color: "#F1B24A", fontWeight: 700, fontSize: 12, cursor: running ? "not-allowed" : "pointer" }}>{running ? "Running…" : isMobile ? "⚡" : "Run Prediction"}</button>
+            <button onClick={() => { if (!isAdmin()) { setShowAdminLogin(true); return; } triggerAlert(); }} disabled={running} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", borderRadius: 999, background: "rgba(255,140,66,0.15)", border: "1px solid rgba(255,140,66,0.3)", color: "#ff8c42", fontWeight: 700, fontSize: 12, cursor: running ? "not-allowed" : "pointer" }}><Bell size={12} />{!isMobile && " Alert"}</button>
           </div>
         </div>
 
@@ -160,7 +176,7 @@ export default function Forecast() {
               <div style={{ fontSize: 32, marginBottom: 10 }}>🌿</div>
               <div style={{ fontSize: 15, fontWeight: 700, color: "#fff", marginBottom: 8 }}>No forecast data yet</div>
               <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginBottom: 16 }}>Run the ML prediction to generate a 7-day fire risk forecast</div>
-              <button onClick={runPrediction} disabled={running} style={{ padding: "10px 24px", borderRadius: 999, background: "rgba(241,178,74,0.15)", border: "1px solid rgba(241,178,74,0.3)", color: "#F1B24A", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+              <button onClick={() => { if (!isAdmin()) { setShowAdminLogin(true); return; } runPrediction(); }} disabled={running} style={{ padding: "10px 24px", borderRadius: 999, background: "rgba(241,178,74,0.15)", border: "1px solid rgba(241,178,74,0.3)", color: "#F1B24A", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
                 {running ? "Running…" : "Run Prediction Now ⚡"}
               </button>
             </div>
@@ -193,7 +209,13 @@ export default function Forecast() {
                       <div style={{ padding: isMobile ? "0 16px 16px" : "0 22px 20px", borderTop: "1px solid rgba(255,255,255,0.07)" }}>
                         <div style={{ paddingTop: 16, display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr", gap: 10 }}>
                           {[
-                            { label: "Risk Score", content: <><div style={{ fontSize: 28, fontWeight: 900, color: col }}>{pct}<span style={{ fontSize: 14 }}>%</span></div><div style={{ marginTop: 8 }}><RiskBar pct={p.risk_probability} color={col} /></div></> },
+                            { label: "Model Confidence", content: <>
+                              <div style={{ fontSize: 28, fontWeight: 900, color: col }}>{pct}<span style={{ fontSize: 14 }}>%</span></div>
+                              <div style={{ marginTop: 8 }}><RiskBar pct={p.risk_probability} color={col} /></div>
+                              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", marginTop: 6 }}>
+                                How sure the model is about this category
+                              </div>
+                            </> },
                             { label: "Risk Category", content: <><div style={{ fontSize: 16, fontWeight: 800, color: col }}>{RISK_ICON[p.risk_label]} {p.risk_label}</div><div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>Code: {p.risk_code}</div></> },
                             { label: "ML Model", content: <><div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>{p.model_name || "XGBoost"}</div><div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>Multi-class · 6 features</div></>, full: isMobile },
                           ].map(card => (
@@ -253,6 +275,15 @@ export default function Forecast() {
 
         </div>
       </div>
+      {showAdminLogin && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(6px)" }}>
+          <div style={{ background: "rgba(8,22,18,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 20, padding: "28px 24px", width: "100%", maxWidth: 380 }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "#fff", marginBottom: 6 }}>🔑 Admin Login</div>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 20 }}>Required to run predictions and send alerts</div>
+            <AdminLogin onLogin={handleAdminLogin} onCancel={() => setShowAdminLogin(false)} />
+          </div>
+        </div>
+      )}
       <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}} *{box-sizing:border-box} ::-webkit-scrollbar{width:4px;height:4px} ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.12);border-radius:3px}`}</style>
     </div>
   );

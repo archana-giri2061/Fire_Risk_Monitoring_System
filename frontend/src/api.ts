@@ -15,6 +15,20 @@ export const API: string =
   (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") ||
   "http://localhost:3000";
 
+/** Get admin key from session */
+export function getAdminKey(): string {
+  return sessionStorage.getItem("vd_admin_key") || "";
+}
+export function setAdminKey(key: string): void {
+  sessionStorage.setItem("vd_admin_key", key.trim());
+}
+export function clearAdminKey(): void {
+  sessionStorage.removeItem("vd_admin_key");
+}
+export function isAdmin(): boolean {
+  return getAdminKey().length > 0;
+}
+
 // ── Types ───────────────────────────────────────────────────────────────────
 
 export interface Prediction {
@@ -136,9 +150,12 @@ export interface SensorIngestBody {
 
 // ── Core fetch helper ────────────────────────────────────────────────────────
 async function call<T>(path: string, options?: RequestInit): Promise<T> {
+  const adminKey = getAdminKey();
+  const baseHeaders: Record<string, string> = { "Content-Type": "application/json" };
+  if (adminKey) baseHeaders["x-admin-key"] = adminKey;
   const res = await fetch(`${API}${path}`, {
     ...options,
-    headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
+    headers: { ...baseHeaders, ...(options?.headers as Record<string,string> ?? {}) },
   });
   if (!res.ok) {
     const body = await res.text().catch(() => res.statusText);

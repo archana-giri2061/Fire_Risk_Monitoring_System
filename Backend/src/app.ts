@@ -37,8 +37,7 @@ async function initDB(): Promise<void> {
       risk_label   TEXT NOT NULL,
       alert_date   DATE NOT NULL,
       message      TEXT,
-      created_at   TIMESTAMPTZ DEFAULT NOW(),
-      UNIQUE (location_key, alert_date, risk_label)
+      created_at   TIMESTAMPTZ DEFAULT NOW()
     );
   `);
   await pool.query(`
@@ -75,6 +74,10 @@ async function initDB(): Promise<void> {
       UNIQUE (date, latitude, longitude)
     );
   `);
+  // Remove UNIQUE constraint from alert_logs so every alert is stored
+  await pool.query(`
+    ALTER TABLE alert_logs DROP CONSTRAINT IF EXISTS alert_logs_location_key_alert_date_risk_label_key
+  `).catch(() => {});
   console.log(" [DB] All tables ready ✅");
 }
 

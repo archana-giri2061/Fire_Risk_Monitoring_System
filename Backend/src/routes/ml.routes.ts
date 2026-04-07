@@ -1,3 +1,4 @@
+import { requireAdmin } from "../middleware/auth.middleware";
 import { Router } from "express";
 import { pool } from "../db";
 import { config } from "../config";
@@ -85,7 +86,7 @@ mlRouter.get("/debug", async (_req, res) => {
 });
 
 /** POST /api/ml/train */
-mlRouter.post("/train", async (_req, res) => {
+mlRouter.post("/train", requireAdmin, async (_req, res) => {
   try {
     console.log("[ML] Starting training…");
     const r = await runPython("ml/scripts/train_model.py");
@@ -101,7 +102,7 @@ mlRouter.post("/train", async (_req, res) => {
 });
 
 /** POST /api/ml/test-archive */
-mlRouter.post("/test-archive", async (_req, res) => {
+mlRouter.post("/test-archive", requireAdmin, async (_req, res) => {
   try {
     const r = await runPython("ml/scripts/test_with_archive.py");
     if (r.code !== 0)
@@ -113,7 +114,7 @@ mlRouter.post("/test-archive", async (_req, res) => {
 });
 
 /** POST /api/ml/predict-forecast */
-mlRouter.post("/predict-forecast", async (_req, res) => {
+mlRouter.post("/predict-forecast", requireAdmin, async (_req, res) => {
   try {
     console.log("[ML] Starting prediction…");
     const r = await runPython("ml/scripts/predict_forecast.py");
@@ -179,7 +180,7 @@ mlRouter.get("/metrics", async (_req, res) => {
 });
 
 /** POST /api/ml/run-all */
-mlRouter.post("/run-all", async (_req, res) => {
+mlRouter.post("/run-all", requireAdmin, async (_req, res) => {
   const results: Record<string, any> = {};
   try {
     const steps: [string, string][] = [

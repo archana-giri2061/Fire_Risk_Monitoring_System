@@ -42,17 +42,63 @@ export interface SendAlertArgs {
 
 // ── Resend HTTP sender (uses Node https — works on all Node versions) ─────────
 
+// ── SMTP sender (nodemailer) ──────────────────────────────────────────────────
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const nodemailer = require("nodemailer");
+
+async function sendViaSMTP(
+  to: string[],
+  subject: string,
+  text: string,
+  html?: string,
+): Promise<{ messageId: string; recipients: string[] }> {
+  const validTo = to.filter(Boolean);
+  console.log(`[SMTP] host=${config.smtp.host} user=${config.smtp.user} pass=${config.smtp.pass ? "SET" : "MISSING"} to=${validTo.join(",")}`);
+
+  if (!config.smtp.host || !config.smtp.user || !config.smtp.pass) {
+    throw new Error(`SMTP missing: ${[
+      !config.smtp.host ? "SMTP_HOST" : "",
+      !config.smtp.user ? "SMTP_USER" : "",
+      !config.smtp.pass ? "SMTP_PASS" : "",
+    ].filter(Boolean).join(", ")} — set in Render Environment`);
+  }
+  if (validTo.length === 0) {
+    throw new Error("ALERT_TO_EMAIL not set — add to Render Environment");
+  }
+
+  const transporter = nodemailer.createTransport({
+    host:   config.smtp.host,
+    port:   config.smtp.port,
+    secure: false,
+    auth:   { user: config.smtp.user, pass: config.smtp.pass },
+    tls:    { rejectUnauthorized: false },
+  });
+
+  const info = await transporter.sendMail({
+    from:    config.smtp.from || config.smtp.user,
+    to:      validTo.join(", "),
+    subject, text,
+    ...(html ? { html } : {}),
+  });
+  console.log(`[SMTP] ✅ Sent msgId=${info.messageId}`);
+  return { messageId: info.messageId ?? "", recipients: validTo };
+}
+
+// ── Resend HTTP sender (uses Node https — no extra deps) ──────────────────────
 async function sendViaResend(
   to: string[],
   subject: string,
   text: string,
   html?: string,
 ): Promise<{ messageId: string; recipients: string[] }> {
-  if (!config.resendApiKey) {
-    throw new Error("RESEND_API_KEY is not set in environment variables.");
-  }
-  if (!config.smtp.to) {
+  const validTo = to.filter(Boolean);
+  if (validTo.length === 0) {
     throw new Error("ALERT_TO_EMAIL is not set in environment variables.");
+  }
+  // ← If no Resend key, use SMTP instead
+  if (!config.resendApiKey) {
+    console.log(" [Email] No RESEND_API_KEY found — using SMTP fallback");
+    return sendViaSMTP(validTo, subject, text, html);
   }
 
   const payload: Record<string, unknown> = {
@@ -83,7 +129,7 @@ async function sendViaResend(
         res.on("end", () => {
           if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
             const parsed = JSON.parse(data) as { id?: string };
-            resolve({ messageId: parsed.id ?? "", recipients: to });
+            resolve({ messageId: parsed.id ?? "", recipients: validTo });
           } else {
             reject(new Error(`Resend API ${res.statusCode}: ${data}`));
           }

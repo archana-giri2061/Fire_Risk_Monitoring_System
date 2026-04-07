@@ -1,3 +1,4 @@
+import AdminLogin from "./AdminLogin";
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
@@ -7,7 +8,7 @@ import {
   Menu, X, Wifi, CalendarDays,
 } from "lucide-react";
 import logo from "../assets/logo.png";
-import { API, api } from "../api";
+import { API, api, isAdmin, setAdminKey, clearAdminKey, getAdminKey } from "../api";
 import type { DashboardData, Prediction } from "../api";
 
 const RISK_COLOR: Record<string, string> = { Low: "#9DC88D", Moderate: "#F1B24A", High: "#ff8c42", Extreme: "#ff4d4d", Unknown: "#888" };
@@ -72,7 +73,19 @@ export default function Dashboard() {
   const [lastSync, setLastSync]     = useState("");
   const [collapsed, setCollapsed]   = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [adminKey, setAdminKeyState] = useState(getAdminKey());
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
   const isMobile = useIsMobile();
+
+  const handleAdminLogin = (key: string) => {
+    setAdminKey(key);
+    setAdminKeyState(key);
+    setShowAdminLogin(false);
+  };
+  const handleAdminLogout = () => {
+    clearAdminKey();
+    setAdminKeyState("");
+  };
 
   const fetchAll = async () => {
     try {
@@ -117,6 +130,15 @@ export default function Dashboard() {
         <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 14 }}>Loading dashboard…</div>
         <div style={{ color: "rgba(255,255,255,0.25)", fontSize: 11 }}>{API}</div>
       </div>
+      {showAdminLogin && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(6px)" }}>
+          <div style={{ background: "rgba(8,22,18,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 20, padding: "28px 24px", width: "100%", maxWidth: 380 }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "#fff", marginBottom: 6 }}>🔑 Admin Login</div>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 20 }}>Enter your admin key to unlock system controls</div>
+            <AdminLogin onLogin={handleAdminLogin} onCancel={() => setShowAdminLogin(false)} />
+          </div>
+        </div>
+      )}
       <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
     </div>
   );
@@ -135,7 +157,16 @@ export default function Dashboard() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {!isMobile && <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 999, background: "rgba(157,200,141,0.12)", border: "1px solid rgba(157,200,141,0.25)", color: "#9DC88D", fontSize: 12, fontWeight: 600 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#9DC88D", animation: "pulse 2s infinite" }} /> Live</div>}
-            <button onClick={handleSync} disabled={syncing} style={{ display: "flex", alignItems: "center", gap: 6, padding: isMobile ? "8px 12px" : "8px 16px", borderRadius: 999, background: "rgba(241,178,74,0.15)", border: "1px solid rgba(241,178,74,0.3)", color: "#F1B24A", fontWeight: 700, fontSize: 13, cursor: syncing ? "not-allowed" : "pointer" }}>
+            {adminKey ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 999, background: "rgba(241,178,74,0.12)", border: "1px solid rgba(241,178,74,0.3)", color: "#F1B24A", fontSize: 12, fontWeight: 600, cursor: "pointer" }} onClick={handleAdminLogout} title="Click to logout">
+                🔑 Admin
+              </div>
+            ) : (
+              <button onClick={() => setShowAdminLogin(true)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 999, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.45)", fontSize: 12, cursor: "pointer" }}>
+                🔒 Admin
+              </button>
+            )}
+            <button onClick={() => { if (!isAdmin()) { setShowAdminLogin(true); return; } handleSync(); }} disabled={syncing} style={{ display: "flex", alignItems: "center", gap: 6, padding: isMobile ? "8px 12px" : "8px 16px", borderRadius: 999, background: "rgba(241,178,74,0.15)", border: "1px solid rgba(241,178,74,0.3)", color: "#F1B24A", fontWeight: 700, fontSize: 13, cursor: syncing ? "not-allowed" : "pointer" }}>
               <RefreshCw size={13} style={{ animation: syncing ? "spin 1s linear infinite" : "none" }} />{!isMobile && (syncing ? " Syncing…" : " Sync Now")}
             </button>
           </div>
@@ -172,10 +203,10 @@ export default function Dashboard() {
 
           {/* Stats */}
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4,1fr)", gap: isMobile ? 10 : 16 }}>
-            <StatCard icon={<Thermometer size={18} />} label="Temperature" value={ov?.temperature != null ? ov.temperature.toFixed(1) : "--"} unit="°C"   color="#ff8c42" sub="Current" trend="up" />
-            <StatCard icon={<Droplets size={18} />}    label="Humidity"    value={ov?.humidity    != null ? ov.humidity.toFixed(0)    : "--"} unit="%"    color="#60a5fa" sub="Relative" />
-            <StatCard icon={<Wind size={18} />}        label="Wind"        value={ov?.windSpeed   != null ? ov.windSpeed.toFixed(1)   : "--"} unit="km/h" color="#9DC88D" sub="Max speed" trend="up" />
-            <StatCard icon={<CloudRain size={18} />}   label="Rainfall"    value={ov?.rainfall    != null ? ov.rainfall.toFixed(1)    : "--"} unit="mm"   color="#a78bfa" sub="Sum" />
+            <StatCard icon={<Thermometer size={18} />} label="Temperature" value={ov?.temperature != null ? ov.temperature.toFixed(1) : "--"} unit="°C"   color="#ff8c42" sub="Today's latest" trend="up" />
+            <StatCard icon={<Droplets size={18} />}    label="Humidity"    value={ov?.humidity    != null ? ov.humidity.toFixed(0)    : "--"} unit="%"    color="#60a5fa" sub="Today's latest" />
+            <StatCard icon={<Wind size={18} />}        label="Wind"        value={ov?.windSpeed   != null ? ov.windSpeed.toFixed(1)   : "--"} unit="km/h" color="#9DC88D" sub="Today's max" trend="up" />
+            <StatCard icon={<CloudRain size={18} />}   label="Rainfall"    value={ov?.rainfall    != null ? ov.rainfall.toFixed(1)    : "--"} unit="mm"   color="#a78bfa" sub="Today's sum" />
           </div>
 
           {/* Status + Forecast */}
@@ -280,7 +311,7 @@ export default function Dashboard() {
 
           {/* Readings table */}
           <div style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 20, padding: "18px 20px", overflowX: "auto" }}>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 14 }}>Recent Weather Readings</div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 14 }}>Historical Daily Readings</div>
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: isMobile ? 480 : "auto" }}>
               <thead><tr>{["Date","Temp","Humidity","Wind","Rainfall","Status"].map(h => <th key={h} style={{ textAlign: "left", padding: "9px 10px", fontSize: 11, color: "rgba(255,255,255,0.38)", fontWeight: 600, background: "rgba(255,255,255,0.04)", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>{h}</th>)}</tr></thead>
               <tbody>{data?.readings?.slice(0, 8).map((r, i) => { const col = r.status === "Critical Watch" ? "#ff4d4d" : r.status === "Dry Conditions" ? "#F1B24A" : r.status === "Wind Alert" ? "#ff8c42" : "#9DC88D"; return <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}><td style={{ padding: "10px", fontSize: 12, color: "rgba(255,255,255,0.6)" }}>{new Date(r.time).toLocaleDateString("en", { month: "short", day: "numeric" })}</td><td style={{ padding: "10px", fontSize: 13, fontWeight: 700, color: "#ff8c42" }}>{r.temperature?.toFixed(1)}°</td><td style={{ padding: "10px", fontSize: 13, color: "#60a5fa" }}>{r.humidity?.toFixed(0)}%</td><td style={{ padding: "10px", fontSize: 13, color: "#9DC88D" }}>{r.windSpeed?.toFixed(1)}</td><td style={{ padding: "10px", fontSize: 13, color: "#a78bfa" }}>{r.rainfall?.toFixed(1)}</td><td style={{ padding: "10px" }}><span style={{ padding: "3px 8px", borderRadius: 999, fontSize: 10, fontWeight: 700, background: `${col}18`, color: col, border: `1px solid ${col}30` }}>{r.status}</span></td></tr>; }) ?? <tr><td colSpan={6} style={{ textAlign: "center", padding: "28px", color: "rgba(255,255,255,0.3)", fontSize: 13 }}>No readings — sync weather data first</td></tr>}</tbody>
@@ -297,9 +328,21 @@ export default function Dashboard() {
                   { label: "2. Run ML Prediction",  color: "#F1B24A", icon: <Cpu size={14} />,       action: api.ml.predictForecast },
                   { label: "3. Send Risk Alert",    color: "#ff8c42", icon: <Bell size={14} />,      action: () => api.alerts.runEmail("High") },
                   { label: "4. Retrain Model",      color: "#c084fc", icon: <BarChart2 size={14} />, action: api.ml.train },
-                ].map(a => <button key={a.label} onClick={() => runAction(a.action)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 12, cursor: "pointer", background: `${a.color}12`, border: `1px solid ${a.color}28`, color: a.color, fontWeight: 600, fontSize: 13, textAlign: "left" }}>{a.icon} {a.label}</button>)}
+                ].map(a => (
+                  <button key={a.label}
+                    onClick={() => {
+                      if (!isAdmin()) { setShowAdminLogin(true); return; }
+                      runAction(a.action);
+                    }}
+                    title={!isAdmin() ? "Admin login required" : undefined}
+                    style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 12, cursor: "pointer", background: isAdmin() ? `${a.color}12` : "rgba(255,255,255,0.03)", border: `1px solid ${isAdmin() ? a.color + "28" : "rgba(255,255,255,0.08)"}`, color: isAdmin() ? a.color : "rgba(255,255,255,0.3)", fontWeight: 600, fontSize: 13, textAlign: "left" }}>
+                    {isAdmin() ? a.icon : <span style={{ fontSize: 12 }}>🔒</span>} {a.label}
+                  </button>
+                ))}
               </div>
-              <div style={{ marginTop: 12, padding: "10px 12px", borderRadius: 10, background: "rgba(255,255,255,0.04)", fontSize: 11, color: "rgba(255,255,255,0.4)" }}>💡 Run steps 1→2 in order to populate all data</div>
+              <div style={{ marginTop: 12, padding: "10px 12px", borderRadius: 10, background: "rgba(255,255,255,0.04)", fontSize: 11, color: "rgba(255,255,255,0.4)" }}>
+                {isAdmin() ? "💡 Run steps 1→2 in order to populate all data" : "🔒 Admin login required to run actions"}
+              </div>
             </div>
             <div style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 20, padding: "18px 20px" }}>
               <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 14 }}>ML Model</div>
@@ -315,6 +358,15 @@ export default function Dashboard() {
 
         </div>
       </div>
+      {showAdminLogin && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(6px)" }}>
+          <div style={{ background: "rgba(8,22,18,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 20, padding: "28px 24px", width: "100%", maxWidth: 380 }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "#fff", marginBottom: 6 }}>🔑 Admin Login</div>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 20 }}>Enter your admin key to unlock system controls</div>
+            <AdminLogin onLogin={handleAdminLogin} onCancel={() => setShowAdminLogin(false)} />
+          </div>
+        </div>
+      )}
       <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}} @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(1.35)}} *{box-sizing:border-box} ::-webkit-scrollbar{width:4px;height:4px} ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.12);border-radius:3px}`}</style>
     </div>
   );

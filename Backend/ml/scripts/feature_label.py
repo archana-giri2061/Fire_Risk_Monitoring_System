@@ -3,10 +3,10 @@ import pandas as pd
 # Fixed risk score thresholds — NOT quantile-based.
 # This ensures training and forecast inference use identical boundaries.
 RISK_THRESHOLDS = {
-    "low_max":      10.0,   # score <= 10  -> Low
-    "moderate_max": 18.0,   # score <= 18  -> Moderate
-    "high_max":     26.0,   # score <= 26  -> High
-    # score > 26            -> Extreme
+    "low_max":       6.0,   # score <=  6 -> Low      (April: ~3.5)
+    "moderate_max": 12.0,   # score <= 12 -> Moderate  (May: ~9)
+    "high_max":     18.0,   # score <= 18 -> High      (June: ~15)
+    # score > 18             -> Extreme   (peak summer: ~21)
 }
 
 

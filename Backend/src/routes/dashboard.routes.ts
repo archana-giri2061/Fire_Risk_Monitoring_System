@@ -75,10 +75,11 @@ dashboardRouter.get("/home", async (_req, res) => {
       for (const r of sRes.rows) sensorMap[String(r.sensor_type).toLowerCase()] = toNum(r.value);
     } catch { sensorMap = {}; }
 
-    const temperature = sensorMap["temperature"] ?? toNum(latest.temp_mean);
-    const humidity    = sensorMap["humidity"]    ?? toNum(latest.humidity_mean);
-    const windSpeed   = sensorMap["wind"] ?? sensorMap["wind_speed"] ?? toNum(latest.wind_speed_max);
-    const rainfall    = sensorMap["rainfall"] ?? sensorMap["precipitation"] ?? toNum(latest.precipitation_sum);
+    // Always use today's weather data — keeps cards in sync with table
+    const temperature = toNum(latest.temp_mean);
+    const humidity    = toNum(latest.humidity_mean);
+    const windSpeed   = toNum(latest.wind_speed_max);
+    const rainfall    = toNum(latest.precipitation_sum);
 
     // ── 4. Build arrays ────────────────────────────────────────────────────
     const readings = rows.map((r) => {

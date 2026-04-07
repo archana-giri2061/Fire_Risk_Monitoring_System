@@ -9,7 +9,8 @@ import {
 } from "lucide-react";
 import logo from "../assets/logo.png";
 
-import { api } from "../api";
+import { api, setAdminKey, getAdminKey, clearAdminKey } from "../api";
+import AdminLogin from "./AdminLogin";
 
 const RISK_COLOR: Record<string, string> = { Low: "#9DC88D", Moderate: "#F1B24A", High: "#ff8c42", Extreme: "#ff4d4d" };
 const RISK_BG:    Record<string, string> = { Low: "rgba(157,200,141,0.15)", Moderate: "rgba(241,178,74,0.15)", High: "rgba(255,140,66,0.15)", Extreme: "rgba(255,77,77,0.15)" };
@@ -127,7 +128,12 @@ export default function Alerts() {
   const [sending, setSending]       = useState<string | null>(null);
   const [expandedLog, setExpandedLog] = useState<number | null>(null);
   const toastId = useRef(0);
+  const [adminKeyLocal, setAdminKeyLocal] = useState(getAdminKey());
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
   const isMobile = useIsMobile();
+  const handleAdminLogin = (key: string) => { setAdminKey(key); setAdminKeyLocal(key); setShowAdminLogin(false); };
+  const handleAdminLogout = () => { clearAdminKey(); setAdminKeyLocal(""); };
+  const admin = adminKeyLocal.length > 0;
 
   const addToast = useCallback((msg: string, type: Toast["type"] = "info") => {
     const id = ++toastId.current;
@@ -152,6 +158,7 @@ export default function Alerts() {
   useEffect(() => { fetchData(); }, []);
 
   const sendAlert = async (minRisk: "High" | "Extreme", label: string) => {
+    if (!admin) { setShowAdminLogin(true); return; }
     setSending(label);
     try {
       const data = await api.alerts.runEmail(minRisk);
@@ -162,8 +169,8 @@ export default function Alerts() {
   };
 
   const sendTestEmail   = async () => { setSending("test"); try { const data = await api.alerts.testEmail(); if (data.ok) { addToast("Test email sent!", "success"); if (soundEnabled) playRiskSound("Low"); } else throw new Error(data.message ?? "Test failed"); } catch { addToast("Test email failed", "error"); } finally { setSending(null); } };
-  const sendTestExtreme = async () => { setSending("test-extreme"); try { const data = await api.alerts.testExtreme(); if (data.ok) { addToast("🔴 Test EXTREME alert sent!", "success"); if (soundEnabled) playRiskSound("Extreme"); } else throw new Error(data.message ?? "Test failed"); } catch { addToast("Test extreme failed", "error"); } finally { setSending(null); } };
-  const sendDailyReport = async () => { setSending("daily"); try { const data = await api.alerts.dailyReport(); if (data.ok && data.sent) { addToast(`Daily report sent — ${data.riskLevel}`, "success"); if (soundEnabled) playRiskSound(data.riskLevel ?? "Low"); } else { addToast(data.message ?? "No predictions", "info"); } } catch { addToast("Daily report failed", "error"); } finally { setSending(null); } };
+  const sendTestExtreme = async () => { if (!admin) { setShowAdminLogin(true); return; } setSending("test-extreme"); try { const data = await api.alerts.testExtreme(); if (data.ok) { addToast("🔴 Test EXTREME alert sent!", "success"); if (soundEnabled) playRiskSound("Extreme"); } else throw new Error(data.message ?? "Test failed"); } catch { addToast("Test extreme failed", "error"); } finally { setSending(null); } };
+  const sendDailyReport = async () => { if (!admin) { setShowAdminLogin(true); return; } setSending("daily"); try { const data = await api.alerts.dailyReport(); if (data.ok && data.sent) { addToast(`Daily report sent — ${data.riskLevel}`, "success"); if (soundEnabled) playRiskSound(data.riskLevel ?? "Low"); } else { addToast(data.message ?? "No predictions", "info"); } } catch { addToast("Daily report failed", "error"); } finally { setSending(null); } };
 
   const worstPred   = preds.find(p => p.risk_label === "Extreme") ?? preds.find(p => p.risk_label === "High");
   const extremeDays = preds.filter(p => p.risk_label === "Extreme").length;
@@ -206,6 +213,8 @@ export default function Alerts() {
               {soundEnabled ? <Volume2 size={13} /> : <VolumeX size={13} />}
               {!isMobile && (soundEnabled ? "Sound On" : "Sound Off")}
             </button>
+            {adminKeyLocal ? <div style={{ padding: "8px 12px", borderRadius: 999, background: "rgba(241,178,74,0.12)", border: "1px solid rgba(241,178,74,0.3)", color: "#F1B24A", fontSize: 12, fontWeight: 600, cursor: "pointer" }} onClick={handleAdminLogout} title="Click to logout">🔑 Admin</div>
+              : <button onClick={() => setShowAdminLogin(true)} style={{ padding: "8px 12px", borderRadius: 999, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.4)", fontSize: 12, cursor: "pointer" }}>🔒 Login</button>}
             <button onClick={fetchData} style={{ ...btn("#9DC88D"), padding: "8px 12px" }}>
               <RefreshCw size={13} />{!isMobile && " Refresh"}
             </button>
@@ -420,6 +429,15 @@ export default function Alerts() {
         </div>
       </div>
 
+      {showAdminLogin && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(6px)" }}>
+          <div style={{ background: "rgba(8,22,18,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 20, padding: "28px 24px", width: "100%", maxWidth: 380 }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "#fff", marginBottom: 6 }}>🔑 Admin Login</div>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 20 }}>Required to send alert emails</div>
+            <AdminLogin onLogin={handleAdminLogin} onCancel={() => setShowAdminLogin(false)} />
+          </div>
+        </div>
+      )}
       <style>{`
         @keyframes spin    { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
         @keyframes pulse   { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(1.3)} }

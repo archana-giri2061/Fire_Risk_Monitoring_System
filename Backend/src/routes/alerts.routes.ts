@@ -206,3 +206,34 @@ alertsRouter.post("/iot-fire", async (req, res) => {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
+
+// ── GET /api/alerts/debug — check email config ────────────────────────────
+alertsRouter.get("/debug", async (_req, res) => {
+  const cfg = {
+    resendApiKey:    config.resendApiKey ? `SET (${config.resendApiKey.slice(0,8)}...)` : "NOT SET",
+    smtpHost:        config.smtp.host   || "NOT SET",
+    smtpUser:        config.smtp.user   || "NOT SET",
+    smtpPass:        config.smtp.pass   ? "SET" : "NOT SET",
+    alertFrom:       config.smtp.from   || "NOT SET",
+    alertTo:         config.smtp.to     || "NOT SET",
+  };
+
+  // Try sending a test email and return full error
+  try {
+    const { sendEmailAlert } = await import("../services/email.service");
+    await sendEmailAlert(
+      "🔧 Debug Test — वन दृष्टि",
+      `Config check at ${new Date().toISOString()}
+From: ${cfg.alertFrom}
+To: ${cfg.alertTo}`
+    );
+    res.json({ ok: true, message: "Email sent successfully!", config: cfg });
+  } catch (e: any) {
+    res.json({
+      ok:     false,
+      error:  e.message,
+      config: cfg,
+      hint:   "Check the error message above to fix email config"
+    });
+  }
+});
