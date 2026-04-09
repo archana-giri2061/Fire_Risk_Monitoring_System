@@ -88,13 +88,14 @@ app.use(cors({
   origin: (origin, cb) => {
     if (!origin) return cb(null, true); // Postman / curl
     const allowed = [
-      "https://fire-risk-monitoring-system-2.onrender.com",
+      
       config.frontendUrl,
       "http://localhost:5173",
       "http://localhost:4173",
       "http://localhost:3000",
+      "http://<YOUR-EC2-ELASTIC-IP>",
     ];
-    if (allowed.includes(origin) || origin.endsWith(".onrender.com")) return cb(null, true);
+    if (allowed.includes(origin)) return cb(null, true);
     cb(new Error(`CORS blocked: ${origin}`));
   },
   credentials: true,
@@ -293,8 +294,8 @@ function scheduleDailyReport(): void {
 app.listen(config.port, "0.0.0.0", () => {
   console.log(`\n${"═".repeat(55)}`);
   console.log(` 🔥  वन दृष्टि — Fire Risk Monitoring`);
-  console.log(` Backend  : https://fire-risk-monitoring-system-1.onrender.com`);
-  console.log(` Frontend : https://fire-risk-monitoring-system-2.onrender.com`);
+  console.log(` Backend  : http://<YOUR-EC2-IP>`);
+  console.log(` Frontend : http://<YOUR-EC2-IP>`);
   console.log(` Port     : ${config.port}  |  Env: ${process.env.NODE_ENV}`);
   console.log(`${"═".repeat(55)}\n`);
 

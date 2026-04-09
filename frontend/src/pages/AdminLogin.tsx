@@ -58,7 +58,7 @@ export default function AdminLogin({ onLogin, onCancel }: Props) {
       </div>
       {error && <div style={{ fontSize: 12, color: "#ff9999", marginBottom: 14 }}>❌ {error}</div>}
       <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginBottom: 16 }}>
-        Set <code style={{ background: "rgba(255,255,255,0.08)", padding: "1px 5px", borderRadius: 3 }}>ADMIN_API_KEY</code> in Render environment variables.
+        Set <code style={{ background: "rgba(255,255,255,0.08)", padding: "1px 5px", borderRadius: 3 }}>ADMIN_API_KEY</code> in your EC2 <code style={{ background: "rgba(255,255,255,0.08)", padding: "1px 5px", borderRadius: 3 }}>.env</code> file.
       </div>
       <div style={{ display: "flex", gap: 8 }}>
         <button

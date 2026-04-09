@@ -1,7 +1,7 @@
 /**
  * auth.middleware.ts
  * Protects admin-only routes (sync, retrain, send alerts).
- * Add ADMIN_API_KEY=your-secret to Render environment variables.
+ * Add ADMIN_API_KEY=your-secret to your .env file on EC2.
  */
 import { Request, Response, NextFunction } from "express";
 

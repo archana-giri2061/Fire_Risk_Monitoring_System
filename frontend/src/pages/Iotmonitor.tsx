@@ -517,7 +517,7 @@ export default function IoTMonitor() {
               <div style={{ fontWeight: 700, color: "#60a5fa", marginBottom: 10 }}>ℹ Demo Mode — Connect your ESP32</div>
               <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", lineHeight: 1.8 }}>
                 Send sensor data from your ESP32 to:<br />
-                <code style={{ background: "rgba(255,255,255,0.08)", padding: "2px 8px", borderRadius: 4, color: "#9DC88D" }}>POST https://fire-risk-monitoring-system-1.onrender.com/api/sensor/ingest</code><br /><br />
+                <code style={{ background: "rgba(255,255,255,0.08)", padding: "2px 8px", borderRadius: 4, color: "#9DC88D" }}>{"POST http://<YOUR-EC2-ELASTIC-IP>/api/sensor/ingest"}</code><br /><br />
                 Payload example:
               </div>
               <pre style={{ background: "rgba(0,0,0,0.3)", borderRadius: 10, padding: "12px 14px", fontSize: 11, color: "#9DC88D", marginTop: 10, overflowX: "auto" }}>{`{

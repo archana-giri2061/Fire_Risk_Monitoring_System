@@ -12,7 +12,7 @@ export const mlRouter = Router();
 /**
  * Run a Python script using "python3 -m runpy <script>" approach
  * This ensures the same Python environment (with installed packages) is used
- * regardless of venv vs system Python on Render.
+ * regardless of venv vs system Python on EC2.
  */
 function runPython(
   scriptRelPath: string,

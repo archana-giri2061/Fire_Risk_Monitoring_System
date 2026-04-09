@@ -60,13 +60,13 @@ async function sendViaSMTP(
       !config.smtp.host ? "SMTP_HOST" : "",
       !config.smtp.user ? "SMTP_USER" : "",
       !config.smtp.pass ? "SMTP_PASS" : "",
-    ].filter(Boolean).join(", ")} — set in Render Environment`);
+    ].filter(Boolean).join(", ")} — set in .env file`);
   }
   if (validTo.length === 0) {
-    throw new Error("ALERT_TO_EMAIL not set — add to Render Environment");
+    throw new Error("ALERT_TO_EMAIL not set — add to .env file");
   }
 
-  // Render blocks IPv6 — use direct IP for smtp.gmail.com
+  // Force IPv4 for smtp.gmail.com
   const smtpHost = config.smtp.host === "smtp.gmail.com" ? "64.233.184.108" : config.smtp.host;
   console.log(`[SMTP] Connecting to ${smtpHost}:${config.smtp.port} (IPv4 forced)`);
 
