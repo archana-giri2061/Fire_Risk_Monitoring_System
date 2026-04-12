@@ -14,9 +14,18 @@ export default function AdminLogin({ onLogin, onCancel }: Props) {
 
   const submit = async () => {
     if (!key.trim()) { setError("Enter admin key"); return; }
+
+    // ── Step 1: client-side check ──────────────────────────────────────────
+    const EXPECTED = import.meta.env.VITE_ADMIN_API_KEY as string | undefined
+      ?? "vanadristi-admin-2026";
+    if (key.trim() !== EXPECTED) {
+      setError("Wrong admin key. Try again.");
+      return;
+    }
+
+    // ── Step 2: verify against backend ────────────────────────────────────
     setLoading(true);
     try {
-      // Verify key works against backend
       const res = await fetch(
         `${(import.meta.env.VITE_API_URL as string || "http://localhost:3000")}/api/ml/metrics`,
         { headers: { "x-admin-key": key.trim(), "Content-Type": "application/json" } }
@@ -27,8 +36,9 @@ export default function AdminLogin({ onLogin, onCancel }: Props) {
         onLogin(key.trim());
       }
     } catch {
-      // Network error but still save key — user can try
-      onLogin(key.trim());
+      // Network unreachable — still block: client-side already matched, but
+      // we cannot confirm the backend accepted it, so reject for safety.
+      setError("Cannot reach server. Check your connection and try again.");
     } finally {
       setLoading(false);
     }

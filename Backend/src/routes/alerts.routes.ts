@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { config } from "../config";
+import { requireAdmin } from "../middleware/auth.middleware";
 import { runRiskEmailAlerts, sendIoTFireAlert } from "../services/alertEngine.service";
 import { sendEmailAlert } from "../services/email.service";
 import { sendDailyRiskReport } from "../services/dailyReport.service";
@@ -8,7 +9,7 @@ import { pool } from "../db";
 export const alertsRouter = Router();
 
 // ── POST /api/alerts/run-email ─────────────────────────────────────────────
-alertsRouter.post("/run-email", async (req, res) => {
+alertsRouter.post("/run-email", requireAdmin, async (req, res) => {
   try {
     const minRisk = (req.body?.minRisk as "High" | "Extreme") ?? "High";
     const extraTo = Array.isArray(req.body?.extraTo) ? req.body.extraTo : [];
@@ -46,7 +47,7 @@ alertsRouter.post("/run-email", async (req, res) => {
 });
 
 // ── POST /api/alerts/run-extreme ───────────────────────────────────────────
-alertsRouter.post("/run-extreme", async (_req, res) => {
+alertsRouter.post("/run-extreme", requireAdmin, async (_req, res) => {
   try {
     const result = await runRiskEmailAlerts({
       latitude:     config.latitude,
@@ -61,7 +62,7 @@ alertsRouter.post("/run-extreme", async (_req, res) => {
 });
 
 // ── POST /api/alerts/daily-report ─────────────────────────────────────────
-alertsRouter.post("/daily-report", async (_req, res) => {
+alertsRouter.post("/daily-report", requireAdmin, async (_req, res) => {
   try {
     const result = await sendDailyRiskReport();
     res.json(result);
@@ -133,7 +134,7 @@ alertsRouter.get("/history", async (req, res) => {
 });
 
 // ── POST /api/alerts/test-email ───────────────────────────────────────────
-alertsRouter.post("/test-email", async (_req, res) => {
+alertsRouter.post("/test-email", requireAdmin, async (_req, res) => {
   try {
     await sendEmailAlert(
       "🧪 Test Email — Wildfire Alert System",
@@ -154,7 +155,7 @@ alertsRouter.post("/test-email", async (_req, res) => {
 });
 
 // ── POST /api/alerts/test-extreme ─────────────────────────────────────────
-alertsRouter.post("/test-extreme", async (_req, res) => {
+alertsRouter.post("/test-extreme", requireAdmin, async (_req, res) => {
   try {
     const { buildFireAlertHtml, buildFireAlertText, sendFireAlert } = await import("../services/email.service");
     const mockDays = [
@@ -174,7 +175,7 @@ alertsRouter.post("/test-extreme", async (_req, res) => {
 });
 
 // ── POST /api/alerts/test-daily-report ────────────────────────────────────
-alertsRouter.post("/test-daily-report", async (_req, res) => {
+alertsRouter.post("/test-daily-report", requireAdmin, async (_req, res) => {
   try {
     const result = await sendDailyRiskReport();
     res.json({ ok: true, message: "Test daily report sent.", ...result });
@@ -184,7 +185,7 @@ alertsRouter.post("/test-daily-report", async (_req, res) => {
 });
 
 // ── POST /api/alerts/iot-fire ─────────────────────────────────────────────
-alertsRouter.post("/iot-fire", async (req, res) => {
+alertsRouter.post("/iot-fire", requireAdmin, async (req, res) => {
   try {
     const {
       deviceId    = "unknown",
@@ -208,7 +209,7 @@ alertsRouter.post("/iot-fire", async (req, res) => {
 });
 
 // ── GET /api/alerts/debug — check email config ────────────────────────────
-alertsRouter.get("/debug", async (_req, res) => {
+alertsRouter.get("/debug", requireAdmin, async (_req, res) => {
   const cfg = {
     resendApiKey:    config.resendApiKey ? `SET (${config.resendApiKey.slice(0,8)}...)` : "NOT SET",
     smtpHost:        config.smtp.host   || "NOT SET",
