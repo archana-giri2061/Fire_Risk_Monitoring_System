@@ -76,3 +76,57 @@ Location Used:
 - Improves accuracy over time
 
 
+Push your changes to GitHub:
+
+Open PowerShell and SSH in:
+ssh -i C:\Users\ARCHANA\Downloads\vandrishti-key.pem ubuntu@52.202.127.155
+
+Pull & Rebuild on EC2
+# 1. Pull latest code
+cd ~/Fire_Risk_Monitoring_System
+git pull origin main
+
+# 2. Rebuild backend
+cd Backend
+npm install
+npm run build
+pm2 restart fire-backend
+
+# 3. Rebuild frontend
+cd ../frontend
+npm install
+npm run build
+sudo cp -r dist/* /var/www/html/
+
+Verify everything is running
+pm2 status
+
+Test in browser
+http://52.202.127.155/
+
+Save this as a script (optional)
+nano ~/deploy.sh
+#!/bin/bash
+echo "🔄 Pulling latest code..."
+cd ~/Fire_Risk_Monitoring_System
+git pull origin main
+
+echo "🔨 Rebuilding backend..."
+cd Backend
+npm install
+npm run build
+pm2 restart fire-backend
+
+echo "🎨 Rebuilding frontend..."
+cd ../frontend
+npm install
+npm run build
+sudo cp -r dist/* /var/www/html/
+
+echo "✅ Done! Site updated."
+pm2 status
+
+Make it executable:
+chmod +x ~/deploy.sh
+~/deploy.sh
+
