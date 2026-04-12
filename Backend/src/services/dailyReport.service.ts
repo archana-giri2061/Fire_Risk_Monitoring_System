@@ -259,6 +259,14 @@ export async function sendDailyRiskReport(): Promise<{
       text: buildDailyReportText(predictions, config.locationKey),
     });
 
+    // Log to DB so duplicate check works
+    await pool.query(
+      `INSERT INTO alert_logs (location_key, risk_label, alert_date, message, created_at)
+       VALUES ($1, $2, CURRENT_DATE, $3, NOW())`,
+      [config.locationKey, worstRisk,
+       `Daily Report sent — Overall: ${worstRisk} risk (${predictions.length} day forecast)`],
+    ).catch(() => {});
+
     console.log(` [Daily Report] Sent successfully | Overall risk: ${worstRisk}`);
     return { ok: true, sent: true, riskLevel: worstRisk };
   } catch (err: any) {

@@ -42,8 +42,7 @@ async function logAlertToDb(args: {
   try {
     await pool.query(
       `INSERT INTO alert_logs (location_key, risk_label, alert_date, message, created_at)
-       VALUES ($1, $2, $3::date, $4, NOW())
-       ON CONFLICT DO NOTHING`,
+       VALUES ($1, $2, $3::date, $4, NOW())`,
       [args.location_key, args.risk_label, args.date, args.message],
     );
   } catch {
@@ -284,6 +283,20 @@ function buildIoTAlertHtml(args: IoTAlertArgs): string {
 export async function autoAlertAfterPrediction(): Promise<AlertResult> {
   try {
     console.log(" Auto-checking predictions for alert conditions …");
+
+    // ── Check if an alert was already sent today ──────────────────────────
+    const { rows } = await pool.query(
+      `SELECT COUNT(*) AS cnt FROM alert_logs
+       WHERE alert_date = CURRENT_DATE
+         AND location_key = $1
+         AND message NOT LIKE '[TEST]%'`,
+      [config.locationKey],
+    ).catch(() => ({ rows: [{ cnt: "0" }] }));
+
+    if (Number(rows[0]?.cnt) > 0) {
+      console.log(" Auto-alert skipped — alert already sent today");
+      return { ok: true, message: "Alert already sent today — skipping duplicate" };
+    }
 
     const result = await runRiskEmailAlerts({
       latitude:     config.latitude,

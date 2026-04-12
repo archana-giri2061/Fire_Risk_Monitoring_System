@@ -8,7 +8,6 @@ import { sensorRouter } from "./routes/sensor.routes";
 import { alertsRouter } from "./routes/alerts.routes";
 import { dashboardRouter } from "./routes/dashboard.routes";
 import { syncWeatherData } from "./services/WeatherSync.service";
-import { autoAlertAfterPrediction } from "./services/alertEngine.service";
 import { sendDailyRiskReport } from "./services/dailyReport.service";
 import { spawn } from "child_process";
 import path from "path";
@@ -241,9 +240,9 @@ function runPython(scriptRelPath: string): Promise<{ code: number; stdout: strin
   });
 }
 
-// ── Full ML pipeline ───────────────────────────────────────────────────────
-async function runFullPipeline(label: string): Promise<void> {
-  console.log(`\n${"─".repeat(50)}\n [${label}] Starting pipeline…`);
+// ── Sync weather + update predictions only (no email) ─────────────────────
+async function syncAndPredict(label: string): Promise<void> {
+  console.log(`\n${"─".repeat(50)}\n [${label}] Syncing weather & predictions…`);
   try { await syncWeatherData(); console.log(` [${label}] ✅ Weather synced`); }
   catch (e: any) { console.error(` [${label}] ❌ Weather sync: ${e.message}`); return; }
 
@@ -251,26 +250,37 @@ async function runFullPipeline(label: string): Promise<void> {
   if (train.code !== 0) { console.error(` [${label}] ❌ Train failed:\n${train.stderr}`); return; }
   console.log(` [${label}] ✅ Model trained`);
 
-  const test = await runPython("ml/scripts/test_with_archive.py");
-  if (test.code !== 0) console.warn(` [${label}] ⚠ Archive test failed (non-fatal)`);
-
   const predict = await runPython("ml/scripts/predict_forecast.py");
   if (predict.code !== 0) { console.error(` [${label}] ❌ Predict failed:\n${predict.stderr}`); return; }
-  console.log(` [${label}] ✅ Forecast predicted`);
-
-  const alert = await autoAlertAfterPrediction();
-  console.log(alert.sent ? ` [${label}] 🔴 Alert sent — ${alert.alerts} day(s)` : ` [${label}] ✅ No alert — ${alert.message}`);
+  console.log(` [${label}] ✅ Forecast predicted — no auto email`);
   console.log(`${"─".repeat(50)}\n`);
 }
 
-async function startupPipeline(attempt = 1): Promise<void> {
-  try { await runFullPipeline("Startup"); }
-  catch (e: any) {
-    if (attempt < 5) { const w = attempt * 10; console.log(` [Startup] Retry ${attempt} in ${w}s…`); setTimeout(() => startupPipeline(attempt + 1), w * 1000); }
+// ── Daily report — sends at 12:00 PM, catches up if server was down ────────
+async function runDailyReport(): Promise<void> {
+  const { pool } = await import("./db");
+
+  // Check if today's daily report was already sent
+  const today = new Date().toISOString().slice(0, 10);
+  const { rows } = await pool.query(
+    `SELECT COUNT(*) AS cnt FROM alert_logs
+     WHERE alert_date = $1
+       AND location_key = $2
+       AND message LIKE '%Daily Report%'`,
+    [today, config.locationKey],
+  ).catch(() => ({ rows: [{ cnt: "0" }] }));
+
+  if (Number(rows[0]?.cnt) > 0) {
+    console.log(" [Daily] Report already sent today — skipping");
+    return;
   }
+
+  console.log(" [Daily] Sending daily report…");
+  const r = await sendDailyRiskReport();
+  console.log(r.sent ? ` [Daily] ✅ Sent | ${r.riskLevel}` : ` [Daily] ⚠ ${r.message}`);
 }
 
-// ── Daily report scheduler ─────────────────────────────────────────────────
+// ── Daily report scheduler — fires at 12:00 PM every day ──────────────────
 function scheduleDailyReport(): void {
   function msToNoon(): number {
     const now = new Date(), next = new Date();
@@ -280,14 +290,30 @@ function scheduleDailyReport(): void {
   }
   function scheduleNext(): void {
     const ms = msToNoon();
-    console.log(` [Daily] Next report in ${(ms / 3600000).toFixed(2)}h`);
+    console.log(` [Daily] Next report scheduled in ${(ms / 3600000).toFixed(2)}h`);
     setTimeout(async () => {
-      const r = await sendDailyRiskReport();
-      console.log(r.sent ? ` [Daily] ✅ Sent | ${r.riskLevel}` : ` [Daily] ⚠ ${r.message}`);
+      await runDailyReport();
       scheduleNext();
     }, ms);
   }
   scheduleNext();
+}
+
+// ── Startup — only sync data + catch up missed daily report ───────────────
+async function onStartup(): Promise<void> {
+  console.log("\n [Startup] Initialising — syncing weather & predictions…");
+  await syncAndPredict("Startup").catch((e: any) =>
+    console.error(" [Startup] Sync error (non-fatal):", e.message)
+  );
+
+  // If it's past noon and today's daily report hasn't been sent yet, send it now
+  const hour = new Date().getHours();
+  if (hour >= 12) {
+    console.log(" [Startup] Past noon — checking if daily report was missed…");
+    await runDailyReport().catch((e: any) =>
+      console.error(" [Startup] Daily report error (non-fatal):", e.message)
+    );
+  }
 }
 
 // ── Start ──────────────────────────────────────────────────────────────────
@@ -299,10 +325,12 @@ app.listen(config.port, "0.0.0.0", () => {
   console.log(` Port     : ${config.port}  |  Env: ${process.env.NODE_ENV}`);
   console.log(`${"═".repeat(55)}\n`);
 
-  // Init DB tables first, then start pipeline
   initDB().then(() => {
-    if (config.syncOnStart) { console.log(" [Startup] Pipeline in 5s…"); setTimeout(() => startupPipeline(), 5000); }
+    // Sync data on startup — NO auto email
+    setTimeout(() => onStartup(), 5000);
+    // Re-sync weather + predictions every 30 min — NO email
+    setInterval(() => syncAndPredict("Scheduled"), config.syncIntervalMinutes * 60 * 1000);
+    // Daily report at 12:00 PM only
+    scheduleDailyReport();
   }).catch((e: any) => console.error(" [DB] Init failed:", e.message));
-  setInterval(() => runFullPipeline("Scheduled"), config.syncIntervalMinutes * 60 * 1000);
-  scheduleDailyReport();
 });
