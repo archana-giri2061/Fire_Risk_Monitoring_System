@@ -175,7 +175,8 @@ export default function Alerts() {
   const worstPred   = preds.find(p => p.risk_label === "Extreme") ?? preds.find(p => p.risk_label === "High");
   const extremeDays = preds.filter(p => p.risk_label === "Extreme").length;
   const highDays    = preds.filter(p => p.risk_label === "High").length;
-  const alertsToday = history.filter(h => h.alert_date === new Date().toISOString().slice(0, 10)).length;
+  const todayUTC = new Date().toISOString().slice(0, 10);
+  const alertsToday = history.filter(h => h.created_at?.slice(0, 10) === todayUTC).length;
 
   const card = (extra?: React.CSSProperties): React.CSSProperties => ({ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 20, padding: "18px 20px", ...extra });
   const btn = (color: string, disabled = false): React.CSSProperties => ({ display: "flex", alignItems: "center", gap: 7, padding: "10px 16px", borderRadius: 999, background: disabled ? `${color}08` : `${color}18`, border: `1px solid ${color}35`, color: disabled ? `${color}60` : color, fontWeight: 700, fontSize: 13, cursor: disabled ? "not-allowed" : "pointer", whiteSpace: "nowrap" as const });
