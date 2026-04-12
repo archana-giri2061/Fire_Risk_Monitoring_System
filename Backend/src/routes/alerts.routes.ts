@@ -122,7 +122,7 @@ alertsRouter.get("/history", async (req, res) => {
     res.json({
       ok:    true,
       count: rows.length,
-      data:  rows.map((r) => ({ ...r, alert_date: String(r.alert_date).slice(0, 10) })),
+      data:  rows.map((r) => ({ ...r, alert_date: new Date(r.alert_date).toISOString().slice(0, 10) })),
     });
   } catch (e: any) {
     if (e.message?.includes("does not exist")) {
