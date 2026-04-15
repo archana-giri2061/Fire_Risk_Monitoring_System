@@ -130,6 +130,35 @@ mlRouter.post("/predict-forecast", requireAdmin, async (_req, res) => {
   }
 });
 
+/** POST /api/ml/predict-iot */
+mlRouter.post("/predict-iot", requireAdmin, async (_req, res) => {
+  try {
+    console.log("[ML] Starting IoT prediction…");
+    const r = await runPython("ml/scripts/predict_iot.py");
+    console.log("[ML] IoT predict exit:", r.code);
+    if (r.code !== 0) {
+      console.error("[ML] IoT predict stderr:", r.stderr.slice(0, 500));
+      return res.status(500).json({ ok: false, message: "IoT prediction failed", stderr: r.stderr, stdout: r.stdout });
+    }
+    // Parse JSON result line from Python stdout
+    let prediction: Record<string, unknown> = {};
+    for (const line of r.stdout.split("\n")) {
+      if (line.startsWith("JSON_RESULT:")) {
+        try { prediction = JSON.parse(line.replace("JSON_RESULT:", "")); } catch { /**/ }
+        break;
+      }
+    }
+    // Auto-alert if High or Extreme risk
+    let alert = {};
+    if (Number(prediction.risk_code) >= 2) {
+      alert = await autoAlertAfterPrediction();
+    }
+    res.json({ ok: true, prediction, alert, stdout: r.stdout });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 /** GET /api/ml/predictions */
 mlRouter.get("/predictions", async (req, res) => {
   try {
