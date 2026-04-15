@@ -150,17 +150,21 @@ export default function IoTMonitor() {
     setPredicting(true);
     setAlertMsg("Running IoT sensor prediction…");
     try {
-      const res = await fetch(
-        `${(import.meta.env.VITE_API_URL as string || "http://localhost:3000")}/api/ml/predict-iot`,
-        { method: "POST", headers: { "Content-Type": "application/json" } },
-      );
+      const { API, getAdminKey } = await import("../api");
+      const res = await fetch(`${API}/api/ml/predict-iot`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-key": getAdminKey(),
+        },
+      });
       const data = await res.json();
       if (data.ok && data.prediction) {
         const p = data.prediction;
         setIotPrediction({ risk_label: p.risk_label, risk_code: p.risk_code, risk_probability: p.risk_probability });
         setAlertMsg(`✅ IoT Prediction: ${p.risk_label} risk (${(p.risk_probability * 100).toFixed(0)}% confidence)`);
       } else {
-        setAlertMsg(`❌ Prediction failed: ${data.message ?? "Check backend logs"}`);
+        setAlertMsg(`❌ Prediction failed: ${data.message ?? data.error ?? "Check backend logs"}`);
       }
     } catch {
       setAlertMsg("❌ Cannot reach backend for IoT prediction");
