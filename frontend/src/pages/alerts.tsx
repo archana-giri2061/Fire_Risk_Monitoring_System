@@ -1,112 +1,89 @@
+/**
+ * alerts.tsx — Alert Center
+ * -------------------------
+ * Manages fire-risk alert emails, history log, sound previews,
+ * and daily report dispatch.
+ */
 import { useEffect, useState, useRef, useCallback } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link } from "react-router-dom";
 import {
   Bell, BellOff, BellRing, CheckCircle, AlertTriangle,
   RefreshCw, Send, Mail, Flame, Clock, MapPin,
-  LayoutDashboard, CalendarDays, Wifi, Activity,
-  Menu, X, Zap, Shield, ChevronDown, ChevronUp,
+  Menu, Zap, Shield, ChevronDown, ChevronUp,
   Volume2, VolumeX,
 } from "lucide-react";
-import logo from "../assets/logo.png";
-
+import { Sidebar } from "../components/Sidebar";
+import { useIsMobile } from "../hooks/useIsMobile";
+import { RISK_COLOR, RISK_BG, RISK_ICON } from "../utils/risk";
 import { api, setAdminKey, getAdminKey, clearAdminKey } from "../api";
 import AdminLogin from "./AdminLogin";
 
-const RISK_COLOR: Record<string, string> = { Low: "#9DC88D", Moderate: "#F1B24A", High: "#ff8c42", Extreme: "#ff4d4d" };
-const RISK_BG:    Record<string, string> = { Low: "rgba(157,200,141,0.15)", Moderate: "rgba(241,178,74,0.15)", High: "rgba(255,140,66,0.15)", Extreme: "rgba(255,77,77,0.15)" };
-const RISK_ICON:  Record<string, string> = { Low: "🟢", Moderate: "🟡", High: "🟠", Extreme: "🔴" };
-
-interface AlertLog { id: number; location_key: string; risk_label: string; alert_date: string; message: string; created_at: string; }
-interface Prediction { date: string; risk_label: string; risk_probability: number; }
-
-function useIsMobile() {
-  const [mobile, setMobile] = useState(window.innerWidth < 768);
-  useEffect(() => {
-    const fn = () => setMobile(window.innerWidth < 768);
-    window.addEventListener("resize", fn);
-    return () => window.removeEventListener("resize", fn);
-  }, []);
-  return mobile;
+/* ── Types ─────────────────────────────────────────────────── */
+interface AlertLog {
+  id: number;
+  location_key: string;
+  risk_label: string;
+  alert_date: string;
+  message: string;
+  created_at: string;
 }
+interface Prediction {
+  date: string;
+  risk_label: string;
+  risk_probability: number;
+}
+interface Toast { id: number; msg: string; type: "success" | "error" | "info" }
 
+/* ── Sound helpers ─────────────────────────────────────────── */
 function createAudioCtx(): AudioContext | null {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  try { return new (window.AudioContext || (window as any).webkitAudioContext)(); } catch { return null; }
+  try { return new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)(); }
+  catch { return null; }
 }
+
 function playTone(ctx: AudioContext, freq: number, dur: number, type: OscillatorType, gain: number, start = 0) {
-  const osc = ctx.createOscillator(); const g = ctx.createGain();
-  osc.connect(g); g.connect(ctx.destination); osc.type = type;
+  const osc = ctx.createOscillator();
+  const g   = ctx.createGain();
+  osc.connect(g); g.connect(ctx.destination);
+  osc.type = type;
   osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
   g.gain.setValueAtTime(gain, ctx.currentTime + start);
   g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dur);
-  osc.start(ctx.currentTime + start); osc.stop(ctx.currentTime + start + dur);
+  osc.start(ctx.currentTime + start);
+  osc.stop(ctx.currentTime + start + dur);
 }
+
 function playRiskSound(risk: string) {
-  const ctx = createAudioCtx(); if (!ctx) return;
+  const ctx = createAudioCtx();
+  if (!ctx) return;
   if (ctx.state === "suspended") ctx.resume();
-  if (risk === "Extreme") { [0, 0.22, 0.44, 0.66, 0.88, 1.1].forEach((t, i) => playTone(ctx, i % 2 === 0 ? 1400 : 900, 0.18, "square", 0.75, t)); }
-  else if (risk === "High") { playTone(ctx, 520, 0.3, "sawtooth", 0.6, 0); playTone(ctx, 780, 0.4, "sawtooth", 0.7, 0.4); }
-  else if (risk === "Moderate") { playTone(ctx, 440, 0.25, "sine", 0.45, 0); playTone(ctx, 550, 0.35, "sine", 0.45, 0.3); }
-  else { playTone(ctx, 660, 0.4, "sine", 0.3, 0); }
+  if (risk === "Extreme") {
+    [0, 0.22, 0.44, 0.66, 0.88, 1.1].forEach((t, i) => playTone(ctx, i % 2 === 0 ? 1400 : 900, 0.18, "square",   0.75, t));
+  } else if (risk === "High") {
+    playTone(ctx, 520, 0.3, "sawtooth", 0.6, 0);
+    playTone(ctx, 780, 0.4, "sawtooth", 0.7, 0.4);
+  } else if (risk === "Moderate") {
+    playTone(ctx, 440, 0.25, "sine",    0.45, 0);
+    playTone(ctx, 550, 0.35, "sine",    0.45, 0.3);
+  } else {
+    playTone(ctx, 660, 0.4, "sine",     0.3,  0);
+  }
 }
 
-function Sidebar({ collapsed, setCollapsed, mobileOpen, setMobileOpen }: { collapsed: boolean; setCollapsed: (v: boolean) => void; mobileOpen?: boolean; setMobileOpen?: (v: boolean) => void }) {
-  const loc = useLocation();
-  const isMobile = useIsMobile();
-  const links = [
-    { to: "/home",     icon: <LayoutDashboard size={18} />, label: "Dashboard"   },
-    { to: "/forecast", icon: <CalendarDays size={18} />,    label: "Forecast"    },
-    { to: "/iot",      icon: <Wifi size={18} />,            label: "IoT Monitor" },
-    { to: "/alerts",   icon: <Bell size={18} />,            label: "Alerts"      },
-    { to: "/",         icon: <Activity size={18} />,        label: "Home"        },
-  ];
-
-  if (isMobile) return (
-    <>
-      {mobileOpen && <div onClick={() => setMobileOpen?.(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 40, backdropFilter: "blur(4px)" }} />}
-      <aside style={{ position: "fixed", top: 0, left: 0, bottom: 0, width: 260, zIndex: 50, background: "rgba(8,22,18,0.98)", backdropFilter: "blur(20px)", borderRight: "1px solid rgba(255,255,255,0.08)", display: "flex", flexDirection: "column", transform: mobileOpen ? "translateX(0)" : "translateX(-100%)", transition: "transform 0.3s ease" }}>
-        <div style={{ padding: "20px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <img src={logo} alt="Logo" style={{ width: 36, height: 36, borderRadius: 10, objectFit: "cover" }} />
-            <div><div style={{ fontFamily: "'Noto Sans Devanagari',sans-serif", fontSize: 16, fontWeight: 800, color: "#fff" }}>वन दृष्टि</div><div style={{ fontSize: 10, color: "#9DC88D" }}>Fire Monitor</div></div>
-          </div>
-          <button onClick={() => setMobileOpen?.(false)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.5)", cursor: "pointer" }}><X size={20} /></button>
-        </div>
-        <nav style={{ flex: 1, padding: "16px 10px", display: "flex", flexDirection: "column", gap: 4 }}>
-          {links.map(lk => {
-            const active = loc.pathname === lk.to;
-            return <Link key={lk.to} to={lk.to} onClick={() => setMobileOpen?.(false)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", borderRadius: 14, background: active ? "linear-gradient(135deg,rgba(241,178,74,0.22),rgba(241,178,74,0.08))" : "transparent", border: active ? "1px solid rgba(241,178,74,0.25)" : "1px solid transparent", color: active ? "#F1B24A" : "rgba(255,255,255,0.7)", fontWeight: active ? 700 : 500, fontSize: 15, textDecoration: "none" }}>{lk.icon}<span>{lk.label}</span></Link>;
-          })}
-        </nav>
-      </aside>
-    </>
-  );
-
-  return (
-    <aside style={{ width: collapsed ? 68 : 220, minHeight: "100vh", flexShrink: 0, background: "rgba(8,22,18,0.85)", backdropFilter: "blur(20px)", borderRight: "1px solid rgba(255,255,255,0.07)", display: "flex", flexDirection: "column", transition: "width 0.3s ease", overflow: "hidden", position: "sticky", top: 0, alignSelf: "flex-start" }}>
-      <div style={{ padding: "20px 16px 16px", display: "flex", alignItems: "center", gap: 12, borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-        <img src={logo} alt="Logo" style={{ width: 36, height: 36, borderRadius: 10, objectFit: "cover", flexShrink: 0 }} />
-        {!collapsed && <div><div style={{ fontFamily: "'Noto Sans Devanagari',sans-serif", fontSize: 16, fontWeight: 800, color: "#fff" }}>वन दृष्टि</div><div style={{ fontSize: 10, color: "#9DC88D" }}>Fire Monitor</div></div>}
-      </div>
-      <nav style={{ flex: 1, padding: "16px 10px", display: "flex", flexDirection: "column", gap: 4 }}>
-        {links.map(lk => {
-          const active = loc.pathname === lk.to;
-          return <Link key={lk.to} to={lk.to} style={{ display: "flex", alignItems: "center", gap: 12, padding: collapsed ? "12px 0" : "12px 14px", justifyContent: collapsed ? "center" : "flex-start", borderRadius: 14, background: active ? "linear-gradient(135deg,rgba(241,178,74,0.22),rgba(241,178,74,0.08))" : "transparent", border: active ? "1px solid rgba(241,178,74,0.25)" : "1px solid transparent", color: active ? "#F1B24A" : "rgba(255,255,255,0.58)", fontWeight: active ? 700 : 500, fontSize: 14, textDecoration: "none" }} onMouseEnter={e => { if (!active) (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; }} onMouseLeave={e => { if (!active) (e.currentTarget as HTMLElement).style.background = "transparent"; }}>{lk.icon}{!collapsed && <span>{lk.label}</span>}</Link>;
-        })}
-      </nav>
-      <button onClick={() => setCollapsed(!collapsed)} style={{ margin: 10, padding: 10, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.5)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        {collapsed ? <Menu size={16} /> : <X size={16} />}
-      </button>
-    </aside>
-  );
-}
-
-interface Toast { id: number; msg: string; type: "success" | "error" | "info" }
+/* ── Toast list ────────────────────────────────────────────── */
 function ToastList({ toasts, remove }: { toasts: Toast[]; remove: (id: number) => void }) {
   return (
     <div style={{ position: "fixed", top: 70, right: 16, zIndex: 999, display: "flex", flexDirection: "column", gap: 8, maxWidth: "calc(100vw - 32px)" }}>
       {toasts.map(t => (
-        <div key={t.id} style={{ padding: "12px 16px", borderRadius: 12, minWidth: 240, display: "flex", alignItems: "center", gap: 10, background: t.type === "success" ? "rgba(157,200,141,0.18)" : t.type === "error" ? "rgba(255,77,77,0.18)" : "rgba(241,178,74,0.18)", border: `1px solid ${t.type === "success" ? "rgba(157,200,141,0.4)" : t.type === "error" ? "rgba(255,77,77,0.4)" : "rgba(241,178,74,0.4)"}`, backdropFilter: "blur(14px)", color: "#fff", fontSize: 13 }}>
+        <div
+          key={t.id}
+          style={{
+            padding: "12px 16px", borderRadius: 12, minWidth: 240,
+            display: "flex", alignItems: "center", gap: 10,
+            background: t.type === "success" ? "rgba(157,200,141,0.18)" : t.type === "error" ? "rgba(255,77,77,0.18)" : "rgba(241,178,74,0.18)",
+            border:     `1px solid ${t.type === "success" ? "rgba(157,200,141,0.4)" : t.type === "error" ? "rgba(255,77,77,0.4)" : "rgba(241,178,74,0.4)"}`,
+            backdropFilter: "blur(14px)", color: "#fff", fontSize: 13,
+          }}
+        >
           {t.type === "success" ? <CheckCircle size={15} color="#9DC88D" /> : t.type === "error" ? <AlertTriangle size={15} color="#ff4d4d" /> : <Bell size={15} color="#F1B24A" />}
           <span style={{ flex: 1, fontSize: 12 }}>{t.msg}</span>
           <button onClick={() => remove(t.id)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.4)", cursor: "pointer", fontSize: 16 }}>×</button>
@@ -116,32 +93,37 @@ function ToastList({ toasts, remove }: { toasts: Toast[]; remove: (id: number) =
   );
 }
 
+/* ── Main Page ─────────────────────────────────────────────── */
 export default function Alerts() {
-  const [history, setHistory]       = useState<AlertLog[]>([]);
-  const [preds, setPreds]           = useState<Prediction[]>([]);
-  const [loading, setLoading]       = useState(true);
-  const [collapsed, setCollapsed]   = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [lastRefresh, setLastRefresh] = useState("");
+  const [history, setHistory]           = useState<AlertLog[]>([]);
+  const [preds, setPreds]               = useState<Prediction[]>([]);
+  const [loading, setLoading]           = useState(true);
+  const [collapsed, setCollapsed]       = useState(false);
+  const [mobileOpen, setMobileOpen]     = useState(false);
+  const [lastRefresh, setLastRefresh]   = useState("");
   const [soundEnabled, setSoundEnabled] = useState(true);
-  const [toasts, setToasts]         = useState<Toast[]>([]);
-  const [sending, setSending]       = useState<string | null>(null);
-  const [expandedLog, setExpandedLog] = useState<number | null>(null);
-  const toastId = useRef(0);
+  const [toasts, setToasts]             = useState<Toast[]>([]);
+  const [sending, setSending]           = useState<string | null>(null);
+  const [expandedLog, setExpandedLog]   = useState<number | null>(null);
   const [adminKeyLocal, setAdminKeyLocal] = useState(getAdminKey());
   const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const toastId = useRef(0);
   const isMobile = useIsMobile();
-  const handleAdminLogin = (key: string) => { setAdminKey(key); setAdminKeyLocal(key); setShowAdminLogin(false); };
-  const handleAdminLogout = () => { clearAdminKey(); setAdminKeyLocal(""); };
+
   const admin = adminKeyLocal.length > 0;
 
+  const handleAdminLogin  = (key: string) => { setAdminKey(key); setAdminKeyLocal(key); setShowAdminLogin(false); };
+  const handleAdminLogout = () => { clearAdminKey(); setAdminKeyLocal(""); };
+
+  /* ── Toast ── */
   const addToast = useCallback((msg: string, type: Toast["type"] = "info") => {
     const id = ++toastId.current;
     setToasts(prev => [...prev, { id, msg, type }]);
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4500);
   }, []);
 
-  const fetchData = async () => {
+  /* ── Data fetch ── */
+  const fetchData = useCallback(async () => {
     try {
       const [histRes, predRes] = await Promise.all([
         api.alerts.history(50),
@@ -150,37 +132,87 @@ export default function Alerts() {
       setHistory(histRes.data || []);
       setPreds(predRes.data || []);
       setLastRefresh(new Date().toLocaleTimeString());
-    } catch { addToast("Failed to fetch — check backend", "error"); }
-    finally { setLoading(false); }
-  };
+    } catch {
+      addToast("Failed to fetch — check backend", "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [addToast]);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
+  /* ── Alert actions ── */
   const sendAlert = async (minRisk: "High" | "Extreme", label: string) => {
     if (!admin) { setShowAdminLogin(true); return; }
     setSending(label);
     try {
       const data = await api.alerts.runEmail(minRisk);
-      if (data.sent) { addToast(`✅ ${label} alert sent — ${data.alerts} day(s)`, "success"); if (soundEnabled) playRiskSound(minRisk); await fetchData(); }
-      else { addToast(`ℹ️ ${data.message}`, "info"); }
+      if (data.sent) {
+        addToast(`✅ ${label} alert sent — ${data.alerts} day(s)`, "success");
+        if (soundEnabled) playRiskSound(minRisk);
+        await fetchData();
+      } else {
+        addToast(`ℹ️ ${data.message}`, "info");
+      }
     } catch { addToast(`Failed to send ${label} alert`, "error"); }
     finally { setSending(null); }
   };
 
-  const sendTestEmail   = async () => { setSending("test"); try { const data = await api.alerts.testEmail(); if (data.ok) { addToast("Test email sent!", "success"); if (soundEnabled) playRiskSound("Low"); await fetchData(); } else throw new Error(data.message ?? "Test failed"); } catch { addToast("Test email failed", "error"); } finally { setSending(null); } };
-  const sendTestExtreme = async () => { if (!admin) { setShowAdminLogin(true); return; } setSending("test-extreme"); try { const data = await api.alerts.testExtreme(); if (data.ok) { addToast("🔴 Test EXTREME alert sent!", "success"); if (soundEnabled) playRiskSound("Extreme"); await fetchData(); } else throw new Error(data.message ?? "Test failed"); } catch { addToast("Test extreme failed", "error"); } finally { setSending(null); } };
-  const sendDailyReport = async () => { if (!admin) { setShowAdminLogin(true); return; } setSending("daily"); try { const data = await api.alerts.dailyReport(); if (data.ok && data.sent) { addToast(`Daily report sent — ${data.riskLevel}`, "success"); if (soundEnabled) playRiskSound(data.riskLevel ?? "Low"); await fetchData(); } else { addToast(data.message ?? "No predictions", "info"); } } catch { addToast("Daily report failed", "error"); } finally { setSending(null); } };
+  const sendTestEmail = async () => {
+    setSending("test");
+    try {
+      const data = await api.alerts.testEmail();
+      if (data.ok) { addToast("Test email sent!", "success"); if (soundEnabled) playRiskSound("Low"); await fetchData(); }
+      else throw new Error(data.message ?? "Test failed");
+    } catch { addToast("Test email failed", "error"); }
+    finally { setSending(null); }
+  };
 
+  const sendTestExtreme = async () => {
+    if (!admin) { setShowAdminLogin(true); return; }
+    setSending("test-extreme");
+    try {
+      const data = await api.alerts.testExtreme();
+      if (data.ok) { addToast("🔴 Test EXTREME alert sent!", "success"); if (soundEnabled) playRiskSound("Extreme"); await fetchData(); }
+      else throw new Error(data.message ?? "Test failed");
+    } catch { addToast("Test extreme failed", "error"); }
+    finally { setSending(null); }
+  };
+
+  const sendDailyReport = async () => {
+    if (!admin) { setShowAdminLogin(true); return; }
+    setSending("daily");
+    try {
+      const data = await api.alerts.dailyReport();
+      if (data.ok && data.sent) { addToast(`Daily report sent — ${data.riskLevel}`, "success"); if (soundEnabled) playRiskSound(data.riskLevel ?? "Low"); await fetchData(); }
+      else { addToast(data.message ?? "No predictions", "info"); }
+    } catch { addToast("Daily report failed", "error"); }
+    finally { setSending(null); }
+  };
+
+  /* ── Derived ── */
   const worstPred   = preds.find(p => p.risk_label === "Extreme") ?? preds.find(p => p.risk_label === "High");
   const extremeDays = preds.filter(p => p.risk_label === "Extreme").length;
   const highDays    = preds.filter(p => p.risk_label === "High").length;
-  const todayUTC = new Date().toISOString().slice(0, 10);
+  const todayUTC    = new Date().toISOString().slice(0, 10);
   const alertsToday = history.filter(h => h.created_at?.slice(0, 10) === todayUTC).length;
 
-  const card = (extra?: React.CSSProperties): React.CSSProperties => ({ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 20, padding: "18px 20px", ...extra });
-  const btn = (color: string, disabled = false): React.CSSProperties => ({ display: "flex", alignItems: "center", gap: 7, padding: "10px 16px", borderRadius: 999, background: disabled ? `${color}08` : `${color}18`, border: `1px solid ${color}35`, color: disabled ? `${color}60` : color, fontWeight: 700, fontSize: 13, cursor: disabled ? "not-allowed" : "pointer", whiteSpace: "nowrap" as const });
+  /* ── Style helpers ── */
+  const card = (extra?: React.CSSProperties): React.CSSProperties => ({
+    background: "rgba(255,255,255,0.05)",
+    border: "1px solid rgba(255,255,255,0.09)",
+    borderRadius: 20, padding: "18px 20px", ...extra,
+  });
+  const btn = (color: string, disabled = false): React.CSSProperties => ({
+    display: "flex", alignItems: "center", gap: 7, padding: "10px 16px",
+    borderRadius: 999, whiteSpace: "nowrap",
+    background: disabled ? `${color}08` : `${color}18`,
+    border: `1px solid ${color}35`,
+    color: disabled ? `${color}60` : color,
+    fontWeight: 700, fontSize: 13, cursor: disabled ? "not-allowed" : "pointer",
+  });
 
+  /* ── Loading ── */
   if (loading) return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
       {!isMobile && <Sidebar collapsed={collapsed} setCollapsed={setCollapsed} />}
@@ -198,8 +230,9 @@ export default function Alerts() {
       <ToastList toasts={toasts} remove={id => setToasts(prev => prev.filter(t => t.id !== id))} />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        {/* Top bar */}
-        <div style={{ padding: isMobile ? "12px 16px" : "14px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.07)", background: "rgba(8,22,18,0.6)", backdropFilter: "blur(14px)", position: "sticky", top: 0, zIndex: 10, gap: 10 }}>
+
+        {/* ── Top bar ── */}
+        <header style={{ padding: isMobile ? "12px 16px" : "14px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.07)", background: "rgba(8,22,18,0.6)", backdropFilter: "blur(14px)", position: "sticky", top: 0, zIndex: 10, gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {isMobile && <button onClick={() => setMobileOpen(true)} style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", padding: 4 }}><Menu size={22} /></button>}
             <div>
@@ -212,17 +245,20 @@ export default function Alerts() {
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button onClick={() => setSoundEnabled(s => !s)} style={{ ...btn(soundEnabled ? "#9DC88D" : "#888"), padding: "8px 12px" }}>
               {soundEnabled ? <Volume2 size={13} /> : <VolumeX size={13} />}
-              {!isMobile && (soundEnabled ? "Sound On" : "Sound Off")}
+              {!isMobile && (soundEnabled ? " Sound On" : " Sound Off")}
             </button>
-            {adminKeyLocal ? <div style={{ padding: "8px 12px", borderRadius: 999, background: "rgba(241,178,74,0.12)", border: "1px solid rgba(241,178,74,0.3)", color: "#F1B24A", fontSize: 12, fontWeight: 600, cursor: "pointer" }} onClick={handleAdminLogout} title="Click to logout">🔑 Admin</div>
-              : <button onClick={() => setShowAdminLogin(true)} style={{ padding: "8px 12px", borderRadius: 999, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.4)", fontSize: 12, cursor: "pointer" }}>🔒 Login</button>}
+            {adminKeyLocal
+              ? <div onClick={handleAdminLogout} title="Click to logout" style={{ padding: "8px 12px", borderRadius: 999, background: "rgba(241,178,74,0.12)", border: "1px solid rgba(241,178,74,0.3)", color: "#F1B24A", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>🔑 Admin</div>
+              : <button onClick={() => setShowAdminLogin(true)} style={{ padding: "8px 12px", borderRadius: 999, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.4)", fontSize: 12, cursor: "pointer" }}>🔒 Login</button>
+            }
             <button onClick={fetchData} style={{ ...btn("#9DC88D"), padding: "8px 12px" }}>
               <RefreshCw size={13} />{!isMobile && " Refresh"}
             </button>
           </div>
-        </div>
+        </header>
 
-        <div style={{ flex: 1, padding: isMobile ? "16px" : "24px", display: "flex", flexDirection: "column", gap: isMobile ? 14 : 22, overflowY: "auto" }}>
+        {/* ── Content ── */}
+        <div style={{ flex: 1, padding: isMobile ? 16 : 24, display: "flex", flexDirection: "column", gap: isMobile ? 14 : 22, overflowY: "auto" }}>
 
           {/* Worst pred banner */}
           {worstPred && (
@@ -242,13 +278,13 @@ export default function Alerts() {
             </div>
           )}
 
-          {/* Stats — 2 col mobile, 4 desktop */}
+          {/* Stat cards */}
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4,1fr)", gap: isMobile ? 10 : 14 }}>
             {[
-              { label: "Total Alerts",  val: history.length,  color: "#60a5fa", icon: <Bell size={18} /> },
-              { label: "Today",         val: alertsToday,     color: "#F1B24A", icon: <Clock size={18} /> },
-              { label: "Extreme Days",  val: extremeDays,     color: "#ff4d4d", icon: <Flame size={18} /> },
-              { label: "High Days",     val: highDays,        color: "#ff8c42", icon: <AlertTriangle size={18} /> },
+              { label: "Total Alerts", val: history.length, color: "#60a5fa", icon: <Bell size={18} /> },
+              { label: "Today",        val: alertsToday,    color: "#F1B24A", icon: <Clock size={18} /> },
+              { label: "Extreme Days", val: extremeDays,    color: "#ff4d4d", icon: <Flame size={18} /> },
+              { label: "High Days",    val: highDays,       color: "#ff8c42", icon: <AlertTriangle size={18} /> },
             ].map(s => (
               <div key={s.label} style={{ ...card(), padding: "16px 14px" }}>
                 <div style={{ width: 38, height: 38, borderRadius: 12, background: `${s.color}18`, border: `1px solid ${s.color}28`, display: "flex", alignItems: "center", justifyContent: "center", color: s.color, marginBottom: 10 }}>{s.icon}</div>
@@ -258,15 +294,17 @@ export default function Alerts() {
             ))}
           </div>
 
-          {/* Actions — stacked on mobile */}
+          {/* Actions + right panel */}
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.4fr 1fr", gap: isMobile ? 14 : 18 }}>
+
+            {/* Left: send actions */}
             <div style={card()}>
               <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 16 }}>Send Alert Notifications</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {[
-                  { color: "#ff8c42", title: "🔶 High Risk Alert",    desc: "Emails when High or Extreme detected",       key: "High",    action: () => sendAlert("High", "High") },
-                  { color: "#ff4d4d", title: "🔴 Extreme Risk Only",  desc: "Emails only when Extreme days exist",         key: "Extreme", action: () => sendAlert("Extreme", "Extreme") },
-                  { color: "#60a5fa", title: "📋 Daily Report",       desc: "Full 7-day report for all risk levels",       key: "daily",   action: sendDailyReport },
+                  { color: "#ff8c42", title: "🔶 High Risk Alert",   desc: "Emails when High or Extreme detected",  key: "High",    action: () => sendAlert("High",    "High")    },
+                  { color: "#ff4d4d", title: "🔴 Extreme Risk Only", desc: "Emails only when Extreme days exist",   key: "Extreme", action: () => sendAlert("Extreme", "Extreme") },
+                  { color: "#60a5fa", title: "📋 Daily Report",      desc: "Full 7-day report for all risk levels", key: "daily",   action: sendDailyReport                       },
                 ].map(item => (
                   <div key={item.key} style={{ padding: "14px 16px", borderRadius: 14, background: `${item.color}08`, border: `1px solid ${item.color}22`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -284,7 +322,7 @@ export default function Alerts() {
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {[
                       { color: "#9DC88D", title: "✅ SMTP Smoke Test",    key: "test",         action: sendTestEmail,   icon: <Mail size={12} /> },
-                      { color: "#ff4d4d", title: "🔴 Fake Extreme Alert", key: "test-extreme", action: sendTestExtreme, icon: <Zap size={12} /> },
+                      { color: "#ff4d4d", title: "🔴 Fake Extreme Alert", key: "test-extreme", action: sendTestExtreme, icon: <Zap  size={12} /> },
                     ].map(item => (
                       <div key={item.key} style={{ padding: "12px 14px", borderRadius: 12, background: `${item.color}07`, border: `1px solid ${item.color}20`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
                         <div style={{ fontSize: 13, fontWeight: 700, color: item.color }}>{item.title}</div>
@@ -300,6 +338,7 @@ export default function Alerts() {
 
             {/* Right column */}
             <div style={{ display: "flex", flexDirection: "column", gap: isMobile ? 14 : 18 }}>
+
               {/* Sound tester */}
               <div style={card()}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
@@ -322,13 +361,13 @@ export default function Alerts() {
                 </div>
               </div>
 
-              {/* Config */}
+              {/* Email config */}
               <div style={card()}>
                 <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 12 }}>Email Config</div>
                 {[
-                  { label: "SMTP",       val: "smtp.gmail.com",      color: "#9DC88D", icon: <Shield size={12} /> },
-                  { label: "Auto Alert", val: "High & Extreme",       color: "#ff8c42", icon: <BellRing size={12} /> },
-                  { label: "Report",     val: "Daily at 10:35 AM",   color: "#60a5fa", icon: <Clock size={12} /> },
+                  { label: "SMTP",       val: "smtp.gmail.com",    color: "#9DC88D", icon: <Shield  size={12} /> },
+                  { label: "Auto Alert", val: "High & Extreme",    color: "#ff8c42", icon: <BellRing size={12} /> },
+                  { label: "Report",     val: "Daily at 10:35 AM", color: "#60a5fa", icon: <Clock   size={12} /> },
                 ].map(item => (
                   <div key={item.label} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
                     <div style={{ color: item.color }}>{item.icon}</div>
@@ -343,7 +382,7 @@ export default function Alerts() {
                 </div>
               </div>
 
-              {/* 7-day mini */}
+              {/* 7-day mini forecast */}
               {preds.length > 0 && (
                 <div style={card()}>
                   <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 12 }}>7-Day Risk</div>
@@ -357,21 +396,27 @@ export default function Alerts() {
                         <div style={{ flex: 1, height: 4, background: "rgba(255,255,255,0.07)", borderRadius: 999, overflow: "hidden" }}>
                           <div style={{ height: "100%", width: `${pct}%`, background: col, borderRadius: 999 }} />
                         </div>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: col, width: 60, textAlign: "right", flexShrink: 0 }}>{RISK_ICON[p.risk_label]} {p.risk_label}</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: col, width: 60, textAlign: "right", flexShrink: 0 }}>
+                          {RISK_ICON[p.risk_label]} {p.risk_label}
+                        </span>
                       </div>
                     );
                   })}
-                  <Link to="/forecast" style={{ display: "block", marginTop: 10, textAlign: "center", fontSize: 12, color: "#F1B24A", fontWeight: 700, textDecoration: "none", padding: "7px", borderRadius: 10, background: "rgba(241,178,74,0.08)", border: "1px solid rgba(241,178,74,0.2)" }}>Full Forecast →</Link>
+                  <Link to="/forecast" style={{ display: "block", marginTop: 10, textAlign: "center", fontSize: 12, color: "#F1B24A", fontWeight: 700, padding: 7, borderRadius: 10, background: "rgba(241,178,74,0.08)", border: "1px solid rgba(241,178,74,0.2)" }}>
+                    Full Forecast →
+                  </Link>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Alert history */}
+          {/* ── Alert history ── */}
           <div style={card()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
               <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", textTransform: "uppercase", letterSpacing: 0.8 }}>Alert History</div>
-              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", padding: "3px 10px", borderRadius: 999, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>{history.length} record{history.length !== 1 ? "s" : ""}</span>
+              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", padding: "3px 10px", borderRadius: 999, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                {history.length} record{history.length !== 1 ? "s" : ""}
+              </span>
             </div>
             {history.length === 0 ? (
               <div style={{ textAlign: "center", padding: "40px 20px", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
@@ -389,7 +434,9 @@ export default function Alerts() {
                   return (
                     <div key={i} style={{ borderRadius: 14, background: "rgba(255,255,255,0.03)", border: `1px solid ${expanded ? col + "35" : "rgba(255,255,255,0.07)"}`, overflow: "hidden" }}>
                       <div style={{ padding: isMobile ? "12px 14px" : "14px 18px", display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }} onClick={() => setExpandedLog(expanded ? null : i)}>
-                        <span style={{ padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: `${col}18`, color: col, border: `1px solid ${col}30`, flexShrink: 0 }}>{RISK_ICON[row.risk_label]} {isMobile ? "" : row.risk_label}</span>
+                        <span style={{ padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: `${col}18`, color: col, border: `1px solid ${col}30`, flexShrink: 0 }}>
+                          {RISK_ICON[row.risk_label]} {!isMobile && row.risk_label}
+                        </span>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 13, fontWeight: 600, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.message}</div>
                           <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 2 }}>{isMobile ? row.alert_date : row.location_key}</div>
@@ -397,10 +444,14 @@ export default function Alerts() {
                         {!isMobile && (
                           <div style={{ textAlign: "right", flexShrink: 0, marginRight: 8 }}>
                             <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)" }}>{row.alert_date}</div>
-                            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>{new Date(row.created_at).toLocaleTimeString("en", { hour: "2-digit", minute: "2-digit" })}</div>
+                            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>
+                              {new Date(row.created_at).toLocaleTimeString("en", { hour: "2-digit", minute: "2-digit" })}
+                            </div>
                           </div>
                         )}
-                        <div style={{ color: "rgba(255,255,255,0.3)", flexShrink: 0 }}>{expanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</div>
+                        <div style={{ color: "rgba(255,255,255,0.3)", flexShrink: 0 }}>
+                          {expanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                        </div>
                       </div>
                       {expanded && (
                         <div style={{ padding: isMobile ? "0 14px 14px" : "0 18px 16px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
@@ -430,6 +481,7 @@ export default function Alerts() {
         </div>
       </div>
 
+      {/* Admin Login Modal */}
       {showAdminLogin && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(6px)" }}>
           <div style={{ background: "rgba(8,22,18,0.98)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 20, padding: "28px 24px", width: "100%", maxWidth: 380 }}>
@@ -439,15 +491,8 @@ export default function Alerts() {
           </div>
         </div>
       )}
-      <style>{`
-        @keyframes spin    { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
-        @keyframes pulse   { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(1.3)} }
-        @keyframes slideIn { from{opacity:0;transform:translateX(20px)} to{opacity:1;transform:translateX(0)} }
-        * { box-sizing:border-box; }
-        ::-webkit-scrollbar { width:4px; height:4px; }
-        ::-webkit-scrollbar-track { background:transparent; }
-        ::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.12); border-radius:3px; }
-      `}</style>
+
+      <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
     </div>
   );
 }

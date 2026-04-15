@@ -76,5 +76,12 @@
     "wind_speed_max"
   ],
   "model": "XGBoost",
-  "num_training_samples": 2505
+  "num_training_samples": 2505,
+  "roc_auc": {
+    "Low": 0.9993400501561881,
+    "Moderate": 0.9950961313925429,
+    "High": 0.9979933110367895,
+    "Extreme": 0.9994513031550069
+  },
+  "macro_auc": 0.9981906154624124
 }
