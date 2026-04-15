@@ -243,3 +243,59 @@ async def ml_run_all():
 
     results["alert"] = await _auto_alert()
     return {"ok": True, "message": "All ML steps completed successfully", "results": results}
+
+
+# ── POST /api/ml/predict-iot ────────────────────────────────────────────────
+@router.post(
+    "/predict-iot",
+    summary="Predict fire risk from latest IoT sensor readings",
+    response_description=(
+        "Risk prediction derived from the latest ESP32 sensor data "
+        "(temperature + humidity from DHT22, rain sensor, wind if available). "
+        "Stored separately from weather-based forecast with model_name='xgboost_iot'."
+    ),
+)
+async def ml_predict_iot():
+    """
+    Reads the most recent readings from `iot_sensor_readings`,
+    maps them to model features, and runs the trained XGBoost classifier.
+
+    - Uses the **same trained model** as `predict_forecast.py`
+    - Does **not** use or modify `daily_weather` data
+    - Stored in `fire_risk_predictions` with `model_name = 'xgboost_iot'`
+    - Automatically triggers email alert if risk is High or Extreme
+    """
+    try:
+        r = _run_script("ml/scripts/predict_iot.py")
+        if r["code"] != 0:
+            raise HTTPException(
+                status_code=500,
+                detail={"ok": False, "stderr": r["stderr"], "stdout": r["stdout"]},
+            )
+
+        # Parse the JSON result line from stdout
+        prediction: dict = {}
+        for line in r["stdout"].splitlines():
+            if line.startswith("JSON_RESULT:"):
+                try:
+                    prediction = json.loads(line[len("JSON_RESULT:"):])
+                except Exception:
+                    pass
+                break
+
+        # Auto-alert if high/extreme risk detected
+        alert: dict = {}
+        if prediction.get("risk_code", 0) >= 2:
+            alert = await _auto_alert()
+
+        return {
+            "ok":        True,
+            "message":   "IoT-based risk prediction complete",
+            "prediction": prediction,
+            "alert":     alert,
+            "stdout":    r["stdout"],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

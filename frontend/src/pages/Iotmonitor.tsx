@@ -113,6 +113,8 @@ export default function IoTMonitor() {
   const [lastRefresh,   setLastRefresh]   = useState("");
   const [selectedId,    setSelectedId]    = useState<string | null>(null);
   const [showSheet,     setShowSheet]     = useState(false);
+  const [iotPrediction, setIotPrediction] = useState<{ risk_label: string; risk_code: number; risk_probability: number } | null>(null);
+  const [predicting,    setPredicting]    = useState(false);
   const alertedRef = useRef<Set<string>>(new Set());
   const isMobile = useIsMobile();
 
@@ -141,6 +143,30 @@ export default function IoTMonitor() {
     setSendingAlert(true);
     try { const d = await api.alerts.runEmail("High"); setAlertMsg(d.sent ? `✅ Manual alert sent — ${d.alerts} day(s)` : `ℹ️ ${d.message}`); }
     catch { setAlertMsg("❌ Failed to send alert"); } finally { setSendingAlert(false); }
+  };
+
+  /* ── IoT-based prediction ── */
+  const predictFromIoT = async () => {
+    setPredicting(true);
+    setAlertMsg("Running IoT sensor prediction…");
+    try {
+      const res = await fetch(
+        `${(import.meta.env.VITE_API_URL as string || "http://localhost:3000")}/api/ml/predict-iot`,
+        { method: "POST", headers: { "Content-Type": "application/json" } },
+      );
+      const data = await res.json();
+      if (data.ok && data.prediction) {
+        const p = data.prediction;
+        setIotPrediction({ risk_label: p.risk_label, risk_code: p.risk_code, risk_probability: p.risk_probability });
+        setAlertMsg(`✅ IoT Prediction: ${p.risk_label} risk (${(p.risk_probability * 100).toFixed(0)}% confidence)`);
+      } else {
+        setAlertMsg(`❌ Prediction failed: ${data.message ?? "Check backend logs"}`);
+      }
+    } catch {
+      setAlertMsg("❌ Cannot reach backend for IoT prediction");
+    } finally {
+      setPredicting(false);
+    }
   };
 
   const testAlert = async () => {
@@ -201,6 +227,11 @@ export default function IoTMonitor() {
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn btn-green"  onClick={fetchDevices}><RefreshCw size={12} />{!isMobile && " Refresh"}</button>
+            <button className="btn btn-amber"  onClick={predictFromIoT} disabled={predicting} title="Predict fire risk from current sensor readings">
+              {predicting
+                ? <><RefreshCw size={12} className="spin" />{!isMobile && " Predicting…"}</>
+                : <>{!isMobile ? "🧠 Predict Risk" : "🧠"}</>}
+            </button>
             <button className="btn btn-blue"   onClick={testAlert}    disabled={sendingAlert}><Zap  size={12} />{!isMobile && " Test"}</button>
             <button className="btn btn-orange" onClick={manualAlert}  disabled={sendingAlert}>
               <Bell size={12} style={{ animation: sendingAlert ? "spin .8s linear infinite" : "none" }} />
@@ -210,6 +241,31 @@ export default function IoTMonitor() {
         </header>
 
         <main style={{ flex: 1, padding: isMobile ? 16 : 24, display: "flex", flexDirection: "column", gap: isMobile ? 14 : 20, overflowY: "auto" }}>
+
+          {/* IoT Prediction result banner */}
+          {iotPrediction && (
+            <div style={{
+              padding: "14px 18px", borderRadius: 16,
+              background: iotPrediction.risk_code >= 3 ? "rgba(255,77,77,.15)" : iotPrediction.risk_code >= 2 ? "rgba(255,140,66,.15)" : "rgba(157,200,141,.12)",
+              border: `1px solid ${iotPrediction.risk_code >= 3 ? "rgba(255,77,77,.35)" : iotPrediction.risk_code >= 2 ? "rgba(255,140,66,.35)" : "rgba(157,200,141,.3)"}`,
+              display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ fontSize: 28 }}>
+                  {iotPrediction.risk_code >= 3 ? "🔴" : iotPrediction.risk_code >= 2 ? "🟠" : iotPrediction.risk_code >= 1 ? "🟡" : "🟢"}
+                </div>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: 16, color: iotPrediction.risk_code >= 2 ? "#FF8C42" : "#9DC88D" }}>
+                    IoT Prediction: {iotPrediction.risk_label} Risk
+                  </div>
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,.55)", marginTop: 2 }}>
+                    Confidence: {(iotPrediction.risk_probability * 100).toFixed(0)}% · Based on live ESP32 sensor readings · Stored separately from weather forecast
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setIotPrediction(null)} style={{ background: "none", border: "none", color: "rgba(255,255,255,.4)", cursor: "pointer", fontSize: 18 }}>×</button>
+            </div>
+          )}
 
           {/* Alert banner */}
           {alertMsg && (
