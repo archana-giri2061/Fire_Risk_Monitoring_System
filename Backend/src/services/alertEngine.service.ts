@@ -12,11 +12,22 @@ const riskRank: Record<string, number> = {
   Low: 0, Moderate: 1, High: 2, Extreme: 3,
 };
 
-function isAboveThreshold(
-  label: string,
-  threshold: "High" | "Extreme"
-): boolean {
+function isAboveThreshold(label: string, threshold: "High" | "Extreme"): boolean {
   return (riskRank[label] ?? -1) >= (riskRank[threshold] ?? 2);
+}
+
+// ── Nepal date helper ──────────────────────────────────────────────────────
+// Returns today's date as YYYY-MM-DD in Nepal Standard Time (UTC+5:45)
+function getTodayNepal(): string {
+  const now = new Date();
+  const nepalOffset = 5 * 60 + 45; // 345 minutes
+  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+  const nepalMs = utcMs + nepalOffset * 60000;
+  const nepalDate = new Date(nepalMs);
+  const y = nepalDate.getFullYear();
+  const m = String(nepalDate.getMonth() + 1).padStart(2, "0");
+  const d = String(nepalDate.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -44,8 +55,7 @@ async function logAlertToDb(args: {
 }): Promise<void> {
   try {
     await pool.query(
-      `INSERT INTO alert_logs
-         (location_key, risk_label, alert_date, message, created_at)
+      `INSERT INTO alert_logs (location_key, risk_label, alert_date, message, created_at)
        VALUES ($1, $2, $3::date, $4, NOW())`,
       [args.location_key, args.risk_label, args.date, args.message],
     );
@@ -132,11 +142,13 @@ export async function runRiskEmailAlerts(args: {
 
   console.log(` Alert sent | msgId=${messageId} | to=${recipients.join(", ")}`);
 
+  // ── Use Nepal date for logging so deduplication works correctly ────────
+  const todayNepal = getTodayNepal();
   for (const day of highDays) {
     await logAlertToDb({
       location_key,
       risk_label: day.risk_label,
-      date:       day.date,
+      date:       todayNepal,
       message:    `${day.risk_label} fire risk detected (confidence: ${(day.risk_probability * 100).toFixed(1)}%)${args.iotNote ? " | " + args.iotNote : ""}`,
     });
   }
@@ -154,18 +166,13 @@ export interface IoTAlertArgs {
   fireDetected: boolean;
 }
 
-export async function sendIoTFireAlert(
-  args: IoTAlertArgs
-): Promise<AlertResult> {
-  const { deviceId, deviceName, location, smokePpm, temperature, fireDetected } = args;
+export async function sendIoTFireAlert(args: IoTAlertArgs): Promise<AlertResult> {
+  const {
+    deviceId, deviceName, location, smokePpm, temperature, fireDetected,
+  } = args;
 
-  const severity = fireDetected
-    ? " FIRE DETECTED"
-    : smokePpm > 300
-    ? " EXTREME SMOKE"
-    : " HIGH SMOKE";
-
-  const subject = `${severity} — IoT Sensor Alert [${location}]`;
+  const severity = fireDetected ? " FIRE DETECTED" : smokePpm > 300 ? " EXTREME SMOKE" : " HIGH SMOKE";
+  const subject  = `${severity} — IoT Sensor Alert [${location}]`;
 
   const body = [
     `${severity}`,
@@ -211,7 +218,7 @@ export async function sendIoTFireAlert(
   await logAlertToDb({
     location_key: location,
     risk_label:   fireDetected ? "Extreme" : "High",
-    date:         new Date().toISOString().slice(0, 10),
+    date:         getTodayNepal(),
     message:      `IoT Alert: ${severity} at ${deviceName} (smoke: ${smokePpm} ppm, temp: ${temperature.toFixed(1)}°C)`,
   });
 
@@ -240,6 +247,53 @@ function buildIoTAlertHtml(args: IoTAlertArgs): string {
     </div>
     <div style="color:rgba(255,255,255,0.65);font-size:14px;">IoT Sensor Emergency Alert</div>
   </div>
+
+  <div style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:20px;margin-bottom:16px;">
+    <div style="color:rgba(255,255,255,0.4);font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Device Info</div>
+    ${[
+      ["Device",      `${deviceName} (${deviceId})`],
+      ["Location",    location],
+      ["Timestamp",   new Date().toLocaleString()],
+    ].map(([k, v]) => `
+      <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
+        <span style="color:rgba(255,255,255,0.45);font-size:13px;">${k}</span>
+        <span style="color:#fff;font-weight:600;font-size:13px;">${v}</span>
+      </div>
+    `).join("")}
+  </div>
+
+  <div style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:20px;margin-bottom:16px;">
+    <div style="color:rgba(255,255,255,0.4);font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Sensor Readings</div>
+    ${[
+      ["Temperature",   `${temperature.toFixed(1)} °C`,   "#ff8c42"],
+      ["Smoke (PPM)",   `${smokePpm} ppm`,                smokePpm > 300 ? "#ff4d4d" : smokePpm > 150 ? "#ff8c42" : "#F1B24A"],
+      ["Fire Sensor",   fireDetected ? "TRIGGERED ⚠" : "Not triggered", fireDetected ? "#ff4d4d" : "#9DC88D"],
+    ].map(([k, v, c]) => `
+      <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
+        <span style="color:rgba(255,255,255,0.45);font-size:13px;">${k}</span>
+        <span style="color:${c};font-weight:700;font-size:13px;">${v}</span>
+      </div>
+    `).join("")}
+  </div>
+
+  <div style="background:${col}12;border:1px solid ${col}35;border-radius:14px;padding:18px;">
+    <div style="color:${col};font-size:14px;font-weight:700;margin-bottom:10px;">⚡ Immediate Action Required</div>
+    ${fireDetected
+      ? `<div style="color:rgba(255,255,255,0.7);font-size:13px;line-height:1.7;">
+          1. Contact emergency services immediately<br>
+          2. Evacuate nearby personnel from the area<br>
+          3. Deploy fire suppression resources<br>
+          4. Notify forest department & local authorities
+        </div>`
+      : `<div style="color:rgba(255,255,255,0.7);font-size:13px;line-height:1.7;">
+          1. Investigate smoke source near sensor<br>
+          2. Increase patrol frequency in the area<br>
+          3. Check for unauthorized burning activities<br>
+          4. Monitor sensor readings closely
+        </div>`
+    }
+  </div>
+
   <div style="margin-top:20px;text-align:center;color:rgba(255,255,255,0.25);font-size:12px;">
     वन दृष्टि — Wildfire Risk Monitoring System · Lumbini Forest Zone
   </div>
@@ -252,65 +306,25 @@ export async function autoAlertAfterPrediction(): Promise<AlertResult> {
   try {
     console.log(" Auto-checking predictions for alert conditions …");
 
-    // ── FIX: Check by WORST risk label today, not just any alert ──────────
-    // Get the worst risk level in today's predictions
-    const predCheck = await pool.query(
-      `SELECT risk_label FROM fire_risk_predictions
-       WHERE latitude  = $1
-         AND longitude = $2
-         AND date >= CURRENT_DATE
-       ORDER BY
-         CASE risk_label
-           WHEN 'Extreme'  THEN 4
-           WHEN 'High'     THEN 3
-           WHEN 'Moderate' THEN 2
-           ELSE 1
-         END DESC
-       LIMIT 1`,
-      [config.latitude, config.longitude],
-    ).catch(() => ({ rows: [] as any[] }));
+    // ── Get today's date in Nepal Standard Time (UTC+5:45) ─────────────────
+    // PostgreSQL CURRENT_DATE is UTC — Nepal is UTC+5:45 so dates can mismatch
+    // We calculate Nepal date in JavaScript and pass it as a parameter
+    const todayNepal = getTodayNepal();
 
-    const todayWorstRisk = predCheck.rows[0]?.risk_label ?? null;
-
-    // Only proceed if risk is High or Extreme
-    if (
-      !todayWorstRisk ||
-      !isAboveThreshold(todayWorstRisk, "High")
-    ) {
-      console.log(
-        ` Auto-alert check done — risk is ${todayWorstRisk ?? "unknown"}, no alert needed`
-      );
-      return {
-        ok:      true,
-        message: `Risk level ${todayWorstRisk} — below High threshold, no alert sent`,
-        sent:    false,
-      };
-    }
-
-    // ── FIX: Check duplicate by EXACT risk_label + today's date ───────────
-    // This means: if High was sent today, don't send again for High
-    // But if it escalates to Extreme later, a new alert CAN be sent
-    const dupCheck = await pool.query(
+    // ── Check if an alert was already sent today using Nepal date ──────────
+    const { rows } = await pool.query(
       `SELECT COUNT(*) AS cnt FROM alert_logs
-       WHERE alert_date   = CURRENT_DATE
+       WHERE alert_date = $2::date
          AND location_key = $1
-         AND risk_label   = $2
          AND message NOT LIKE '[TEST]%'`,
-      [config.locationKey, todayWorstRisk],
+      [config.locationKey, todayNepal],
     ).catch(() => ({ rows: [{ cnt: "0" }] }));
 
-    if (Number(dupCheck.rows[0]?.cnt) > 0) {
-      console.log(
-        ` Auto-alert skipped — ${todayWorstRisk} alert already sent today`
-      );
-      return {
-        ok:      true,
-        message: `${todayWorstRisk} alert already sent today — skipping duplicate`,
-        sent:    false,
-      };
+    if (Number(rows[0]?.cnt) > 0) {
+      console.log(" Auto-alert skipped — alert already sent today");
+      return { ok: true, message: "Alert already sent today — skipping duplicate" };
     }
 
-    // ── No duplicate found — send alert ───────────────────────────────────
     const result = await runRiskEmailAlerts({
       latitude:     config.latitude,
       longitude:    config.longitude,
