@@ -1,7 +1,7 @@
 {
   "validation_accuracy": 0.9720558882235529,
-  "cv_accuracy_mean": 0.9728542914171656,
-  "cv_accuracy_std": 0.003702043311575119,
+  "cv_accuracy_mean": NaN,
+  "cv_accuracy_std": NaN,
   "confusion_matrix": [
     [
       380,

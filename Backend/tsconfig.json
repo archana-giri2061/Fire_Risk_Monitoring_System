@@ -8,10 +8,11 @@
     "resolveJsonModule": true,
     "strict": false,
     "skipLibCheck": true,
-    "types": ["node"],
+    "types": ["node", "jest"],
     "noUnusedLocals": false,
     "noUnusedParameters": false
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
+  
 }
