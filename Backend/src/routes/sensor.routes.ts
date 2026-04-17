@@ -7,6 +7,7 @@ export const sensorRouter = Router();
 sensorRouter.post("/ingest", async (req, res) => {
   try {
     const { device_id, seq, measured_at, readings } = req.body;
+
     if (
       !device_id ||
       seq === undefined ||
@@ -35,8 +36,6 @@ sensorRouter.post("/ingest", async (req, res) => {
     `);
 
     // ── Check for duplicate BEFORE inserting ──────────────────────────────
-    // A payload is a duplicate if ALL sensor_ids in this batch already exist
-    // for this device_id + seq combination
     const firstSensorId = readings[0]?.sensor_id;
     if (firstSensorId) {
       const dupCheck = await pool.query(
@@ -47,7 +46,6 @@ sensorRouter.post("/ingest", async (req, res) => {
          LIMIT 1`,
         [device_id, firstSensorId, Number(seq)],
       );
-
       if (dupCheck.rows.length > 0) {
         return res.status(409).json({
           ok: false,
@@ -83,21 +81,20 @@ sensorRouter.post("/ingest", async (req, res) => {
       res.json({ ok: true, inserted: readings.length });
     } catch (e: any) {
       await client.query("ROLLBACK");
+      console.error("[Sensor] Insert error:", e.message);
       res.status(500).json({ ok: false, error: e.message });
     } finally {
       client.release();
     }
   } catch (e: any) {
+    console.error("[Sensor] Route error:", e.message);
     res.status(500).json({ ok: false, error: e.message });
   }
 });
 
 // ── GET /api/sensor/ingest (info) ──────────────────────────────────────────
 sensorRouter.get("/ingest", (_req, res) => {
-  res.json({
-    ok: true,
-    message: "Use POST /api/sensor/ingest to send data",
-  });
+  res.json({ ok: true, message: "Use POST /api/sensor/ingest to send data" });
 });
 
 // ── GET /api/sensor/devices ────────────────────────────────────────────────
@@ -137,8 +134,7 @@ async function getAllReadings(req: any, res: any) {
         t === "rain"  ? "rain"        :
         t === "soil"  ? "soil"        :
         t === "smoke" ? "smoke"       :
-        t === "fire"  ? "fire"        :
-        t;
+        t === "fire"  ? "fire"        : t;
       return {
         ...r,
         sensor_type:   normalizedType,
@@ -156,8 +152,7 @@ async function getAllReadings(req: any, res: any) {
         fire_detected:
           t === "fire"  ? v > 0   :
           t === "smoke" ? v > 300 :
-          t === "co2"   ? v > 800 :
-          false,
+          t === "co2"   ? v > 800 : false,
       };
     });
     res.json({ ok: true, count: data.length, data });
