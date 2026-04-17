@@ -2,16 +2,15 @@ import express from "express";
 import "dotenv/config";
 import cors from "cors";
 import { config } from "./config";
-import { mlRouter } from "./routes/ml.routes";
-import { weatherRouter } from "./routes/weather.routes";
-import { sensorRouter } from "./routes/sensor.routes";
-import { alertsRouter } from "./routes/alerts.routes";
+import { mlRouter }        from "./routes/ml.routes";
+import { weatherRouter }   from "./routes/weather.routes";
+import { sensorRouter }    from "./routes/sensor.routes";
+import { alertsRouter }    from "./routes/alerts.routes";
 import { dashboardRouter } from "./routes/dashboard.routes";
 import { syncWeatherData } from "./services/WeatherSync.service";
 import { sendDailyRiskReport } from "./services/dailyReport.service";
 import { spawn } from "child_process";
 import path from "path";
-
 
 // ── Auto-create all required tables ───────────────────────────────────────
 async function initDB(): Promise<void> {
@@ -73,9 +72,9 @@ async function initDB(): Promise<void> {
       UNIQUE (date, latitude, longitude)
     );
   `);
-  // Remove UNIQUE constraint from alert_logs so every alert is stored
   await pool.query(`
-    ALTER TABLE alert_logs DROP CONSTRAINT IF EXISTS alert_logs_location_key_alert_date_risk_label_key
+    ALTER TABLE alert_logs
+    DROP CONSTRAINT IF EXISTS alert_logs_location_key_alert_date_risk_label_key
   `).catch(() => {});
   console.log(" [DB] All tables ready ✅");
 }
@@ -83,23 +82,31 @@ async function initDB(): Promise<void> {
 const app = express();
 
 // ── CORS ───────────────────────────────────────────────────────────────────
+// FIX 1: Replaced <YOUR-EC2-ELASTIC-IP> placeholder with actual IP
+// FIX 2: Added x-admin-key to allowedHeaders so sensor POST and admin
+//         routes work correctly from Postman and the frontend
 app.use(cors({
   origin: (origin, cb) => {
     if (!origin) return cb(null, true); // Postman / curl
     const allowed = [
-      
       config.frontendUrl,
       "http://localhost:5173",
       "http://localhost:4173",
       "http://localhost:3000",
-      "http://<YOUR-EC2-ELASTIC-IP>",
+      "http://52.202.127.155",        // EC2 public IP
+      "http://52.202.127.155:3000",   // EC2 backend direct
+      "http://172.31.25.236",         // EC2 private IP
     ];
     if (allowed.includes(origin)) return cb(null, true);
     cb(new Error(`CORS blocked: ${origin}`));
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "x-admin-key",      // FIX: was missing — blocked all admin and sensor routes
+  ],
 }));
 
 app.use(express.json());
@@ -108,19 +115,18 @@ app.use(express.urlencoded({ extended: true }));
 // ── Health check ───────────────────────────────────────────────────────────
 app.get("/check", (_req, res) => {
   res.json({
-    ok: true, message: "Backend running",
+    ok: true,
+    message: "Backend running",
     environment: process.env.NODE_ENV || "development",
     frontend: config.frontendUrl,
     timestamp: new Date().toISOString(),
   });
 });
 
-// ── DB Status endpoint ────────────────────────────────────────────────────
+// ── DB Status endpoint ─────────────────────────────────────────────────────
 app.get("/api/db-status", async (_req, res) => {
   try {
     const { pool } = await import("./db");
-
-    // Check each table
     const tables = [
       "daily_weather",
       "daily_weather_forecast",
@@ -128,14 +134,11 @@ app.get("/api/db-status", async (_req, res) => {
       "iot_sensor_readings",
       "alert_logs",
     ];
-
     const result: Record<string, any> = {};
-
     for (const table of tables) {
       try {
         const r = await pool.query(
-          `SELECT COUNT(*) AS cnt, MAX(created_at) AS last_row
-           FROM ${table}` 
+          `SELECT COUNT(*) AS cnt, MAX(created_at) AS last_row FROM ${table}`
         );
         result[table] = {
           exists: true,
@@ -144,51 +147,47 @@ app.get("/api/db-status", async (_req, res) => {
         };
       } catch {
         try {
-          // Some tables use different timestamp column
-          const r2 = await pool.query(`SELECT COUNT(*) AS cnt FROM ${table}`);
-          result[table] = { exists: true, rows: Number(r2.rows[0].cnt), latest: "n/a" };
+          const r2 = await pool.query(
+            `SELECT COUNT(*) AS cnt FROM ${table}`
+          );
+          result[table] = {
+            exists: true,
+            rows: Number(r2.rows[0].cnt),
+            latest: "n/a",
+          };
         } catch {
           result[table] = { exists: false, rows: 0 };
         }
       }
     }
-
-    // Latest sensor readings per device
     let sensorSummary: any[] = [];
     try {
       const sr = await pool.query(`
         SELECT device_id, sensor_type, value, unit, measured_at
         FROM iot_sensor_readings
-        ORDER BY measured_at DESC
-        LIMIT 20
+        ORDER BY measured_at DESC LIMIT 20
       `);
       sensorSummary = sr.rows;
     } catch { /**/ }
-
-    // Latest predictions
     let predictions: any[] = [];
     try {
       const pr = await pool.query(`
         SELECT date, risk_label, risk_probability, created_at
         FROM fire_risk_predictions
-        ORDER BY date DESC
-        LIMIT 7
+        ORDER BY date DESC LIMIT 7
       `);
       predictions = pr.rows;
     } catch { /**/ }
-
-    // Latest weather
     let weather: any[] = [];
     try {
       const wr = await pool.query(`
-        SELECT date, temp_mean, humidity_mean, wind_speed_max, data_source
+        SELECT date, temp_mean, humidity_mean,
+               wind_speed_max, data_source
         FROM daily_weather
-        ORDER BY date DESC
-        LIMIT 5
+        ORDER BY date DESC LIMIT 5
       `);
       weather = wr.rows;
     } catch { /**/ }
-
     res.json({
       ok: true,
       timestamp: new Date().toISOString(),
@@ -211,11 +210,16 @@ app.use("/api/dashboard", dashboardRouter);
 
 // ── 404 handler ────────────────────────────────────────────────────────────
 app.use((req, res) => {
-  res.status(404).json({ ok: false, error: `Route not found: ${req.method} ${req.path}` });
+  res.status(404).json({
+    ok: false,
+    error: `Route not found: ${req.method} ${req.path}`,
+  });
 });
 
 // ── Python runner ──────────────────────────────────────────────────────────
-function runPython(scriptRelPath: string): Promise<{ code: number; stdout: string; stderr: string }> {
+function runPython(
+  scriptRelPath: string
+): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const scriptPath = path.resolve(process.cwd(), scriptRelPath);
     const cmd = process.platform === "win32" ? "python" : "python3";
@@ -240,47 +244,56 @@ function runPython(scriptRelPath: string): Promise<{ code: number; stdout: strin
   });
 }
 
-// ── Sync weather + update predictions only (no email) ─────────────────────
+// ── Sync weather + update predictions ─────────────────────────────────────
 async function syncAndPredict(label: string): Promise<void> {
   console.log(`\n${"─".repeat(50)}\n [${label}] Syncing weather & predictions…`);
-  try { await syncWeatherData(); console.log(` [${label}] ✅ Weather synced`); }
-  catch (e: any) { console.error(` [${label}] ❌ Weather sync: ${e.message}`); return; }
-
+  try {
+    await syncWeatherData();
+    console.log(` [${label}] ✅ Weather synced`);
+  } catch (e: any) {
+    console.error(` [${label}] ❌ Weather sync: ${e.message}`);
+    return;
+  }
   const train = await runPython("ml/scripts/train_model.py");
-  if (train.code !== 0) { console.error(` [${label}] ❌ Train failed:\n${train.stderr}`); return; }
+  if (train.code !== 0) {
+    console.error(` [${label}] ❌ Train failed:\n${train.stderr}`);
+    return;
+  }
   console.log(` [${label}] ✅ Model trained`);
-
   const predict = await runPython("ml/scripts/predict_forecast.py");
-  if (predict.code !== 0) { console.error(` [${label}] ❌ Predict failed:\n${predict.stderr}`); return; }
-  console.log(` [${label}] ✅ Forecast predicted — no auto email`);
+  if (predict.code !== 0) {
+    console.error(` [${label}] ❌ Predict failed:\n${predict.stderr}`);
+    return;
+  }
+  console.log(` [${label}] ✅ Forecast predicted`);
   console.log(`${"─".repeat(50)}\n`);
 }
 
-// ── Daily report — sends at 12:00 PM, catches up if server was down ────────
+// ── Daily report ───────────────────────────────────────────────────────────
 async function runDailyReport(): Promise<void> {
   const { pool } = await import("./db");
-
-  // Check if today's daily report was already sent
   const today = new Date().toISOString().slice(0, 10);
   const { rows } = await pool.query(
     `SELECT COUNT(*) AS cnt FROM alert_logs
-     WHERE alert_date = $1
+     WHERE alert_date  = $1
        AND location_key = $2
        AND message LIKE '%Daily Report%'`,
     [today, config.locationKey],
   ).catch(() => ({ rows: [{ cnt: "0" }] }));
-
   if (Number(rows[0]?.cnt) > 0) {
     console.log(" [Daily] Report already sent today — skipping");
     return;
   }
-
   console.log(" [Daily] Sending daily report…");
   const r = await sendDailyRiskReport();
-  console.log(r.sent ? ` [Daily] ✅ Sent | ${r.riskLevel}` : ` [Daily] ⚠ ${r.message}`);
+  console.log(
+    r.sent
+      ? ` [Daily] ✅ Sent | ${r.riskLevel}`
+      : ` [Daily] ⚠ ${r.message}`
+  );
 }
 
-// ── Daily report scheduler — fires at 12:00 PM every day ──────────────────
+// ── Daily report scheduler ─────────────────────────────────────────────────
 function scheduleDailyReport(): void {
   function msToNoon(): number {
     const now = new Date(), next = new Date();
@@ -290,7 +303,7 @@ function scheduleDailyReport(): void {
   }
   function scheduleNext(): void {
     const ms = msToNoon();
-    console.log(` [Daily] Next report scheduled in ${(ms / 3600000).toFixed(2)}h`);
+    console.log(` [Daily] Next report in ${(ms / 3600000).toFixed(2)}h`);
     setTimeout(async () => {
       await runDailyReport();
       scheduleNext();
@@ -299,38 +312,37 @@ function scheduleDailyReport(): void {
   scheduleNext();
 }
 
-// ── Startup — only sync data + catch up missed daily report ───────────────
+// ── Startup ────────────────────────────────────────────────────────────────
 async function onStartup(): Promise<void> {
-  console.log("\n [Startup] Initialising — syncing weather & predictions…");
+  console.log("\n [Startup] Syncing weather & predictions…");
   await syncAndPredict("Startup").catch((e: any) =>
     console.error(" [Startup] Sync error (non-fatal):", e.message)
   );
-
-  // If it's past noon and today's daily report hasn't been sent yet, send it now
   const hour = new Date().getHours();
   if (hour >= 12) {
-    console.log(" [Startup] Past noon — checking if daily report was missed…");
+    console.log(" [Startup] Past noon — checking missed daily report…");
     await runDailyReport().catch((e: any) =>
       console.error(" [Startup] Daily report error (non-fatal):", e.message)
     );
   }
 }
 
-// ── Start ──────────────────────────────────────────────────────────────────
+// ── Start server ───────────────────────────────────────────────────────────
 app.listen(config.port, "0.0.0.0", () => {
   console.log(`\n${"═".repeat(55)}`);
   console.log(` 🔥  वन दृष्टि — Fire Risk Monitoring`);
-  console.log(` Backend  : http://<YOUR-EC2-IP>`);
-  console.log(` Frontend : http://<YOUR-EC2-IP>`);
+  console.log(` Backend  : http://52.202.127.155:${config.port}`);
   console.log(` Port     : ${config.port}  |  Env: ${process.env.NODE_ENV}`);
   console.log(`${"═".repeat(55)}\n`);
 
   initDB().then(() => {
-    // Sync data on startup — NO auto email
     setTimeout(() => onStartup(), 5000);
-    // Re-sync weather + predictions every 30 min — NO email
-    setInterval(() => syncAndPredict("Scheduled"), config.syncIntervalMinutes * 60 * 1000);
-    // Daily report at 12:00 PM only
+    setInterval(
+      () => syncAndPredict("Scheduled"),
+      config.syncIntervalMinutes * 60 * 1000
+    );
     scheduleDailyReport();
-  }).catch((e: any) => console.error(" [DB] Init failed:", e.message));
+  }).catch((e: any) =>
+    console.error(" [DB] Init failed:", e.message)
+  );
 });

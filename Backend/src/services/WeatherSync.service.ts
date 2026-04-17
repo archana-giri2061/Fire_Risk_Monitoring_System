@@ -1,17 +1,31 @@
+//Import application configuration values
 import { config } from "../config";
+// Import necessary package
 import { fetchArchiveDailyWeather } from "./archive.service";
 import { fetchForecastDailyWeather } from "./forecast.service";
 import { upsertArchive, replaceForecast } from "./weatherStore.service";
 import { exportLiveWeatherDataset } from "./datasetExport.service";
+//Import PostgreSQL connection Pool
 import { pool } from "../db";
-
+/**
+ * Convert a JavaScript Date object into YYYY-MM-DD format
+ * Example: 2026-04-16
+ */
 function toISODate(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
   const d = String(date.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
 }
-
+/**
+ * Retry helper function
+ * Executes an async function and retries if it fails
+ *
+ * @param fn       Function to execute
+ * @param label    Name shown in logs
+ * @param retries  Number of retry attempts
+ * @param delayMs  Delay between retries in milliseconds
+ */
 async function withRetry<T>(
   fn: () => Promise<T>,
   label: string,
@@ -19,23 +33,31 @@ async function withRetry<T>(
   delayMs = 3000,
 ): Promise<T> {
   let lastError: any;
+  //Try multiple times
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      return await fn();
+      return await fn();//return result if successful
     } catch (err: any) {
       lastError = err;
+      //log failed attempt
       console.warn(`  ${label} failed (attempt ${attempt}/${retries}): ${err.message}`);
+      //Wait before next retry
       if (attempt < retries) {
         await new Promise((r) => setTimeout(r, delayMs));
       }
     }
   }
+  // Throw error after all retries fail
   throw lastError;
 }
 
 /**
- * Delete archive rows older than keepDays from the database.
- * This keeps the DB clean — only recent data is stored.
+ * Delete old archive weather data older than keepDays
+ *
+ * Keeps database clean by removing outdated historical rows
+ *
+ * @param keepDays Number of recent days to keep
+ * @returns Number of deleted rows
  */
 async function deleteOldArchiveData(keepDays: number): Promise<number> {
   const result = await pool.query(
@@ -47,9 +69,20 @@ async function deleteOldArchiveData(keepDays: number): Promise<number> {
   );
   return result.rowCount ?? 0;
 }
-
+/**
+ * Main weather sync function
+ *
+ * Steps:
+ * 1. Delete old archive data
+ * 2. Fetch fresh historical weather data
+ * 3. Fetch fresh forecast data
+ * 4. Save data into database
+ * 5. Export dataset for ML model
+ */
 export async function syncWeatherData() {
+   // Today's date
   const end   = new Date();
+  // Start date = today - archiveDays
   const start = new Date();
   start.setDate(end.getDate() - config.archiveDays);
 
@@ -58,13 +91,13 @@ export async function syncWeatherData() {
 
   console.log(`\n  Weather sync started: ${startDate} → ${endDate}`);
 
-  // ── Step 1: Delete old data beyond our window ──────────────────────────
+  // Delete old data beyond our window
   const deleted = await deleteOldArchiveData(config.archiveDays);
   if (deleted > 0) {
     console.log(`  Deleted ${deleted} old archive rows (keeping last ${config.archiveDays} days)`);
   }
 
-  // ── Step 2: Fetch fresh archive from Open-Meteo ────────────────────────
+  // Fetch fresh archive from Open-Meteo
   const archiveRows = await withRetry(
     () => fetchArchiveDailyWeather({
       latitude:   config.latitude,
@@ -75,7 +108,7 @@ export async function syncWeatherData() {
     "Archive fetch",
   );
 
-  // ── Step 3: Fetch fresh 7-day forecast ────────────────────────────────
+  // Fetch fresh 7-day forecast 
   const forecastRows = await withRetry(
     () => fetchForecastDailyWeather({
       latitude:  config.latitude,
@@ -85,7 +118,7 @@ export async function syncWeatherData() {
     "Forecast fetch",
   );
 
-  // ── Step 4: Save to DB ─────────────────────────────────────────────────
+  // ── Step 4: Save to DB 
   const archiveResult = await upsertArchive({
     location_key: config.locationKey,
     latitude:     config.latitude,
@@ -99,7 +132,7 @@ export async function syncWeatherData() {
     rows:      forecastRows,
   });
 
-  // ── Step 5: Export CSV dataset for ML ─────────────────────────────────
+  // ── Step 5: Export CSV dataset for ML
   const datasetResult = await exportLiveWeatherDataset(startDate, endDate);
 
   console.log(` Sync complete — archive: ${archiveResult.insertedOrUpdated} rows, forecast: ${forecastResult.insertedOrUpdated} rows`);
