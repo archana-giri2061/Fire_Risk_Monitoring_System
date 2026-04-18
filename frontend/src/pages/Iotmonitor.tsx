@@ -1,7 +1,7 @@
 /**
  * Iotmonitor.tsx — IoT Sensor Monitor
  * Shows ESP32 sensor nodes: fire, CO₂, rain, soil, battery.
- * Auto-refreshes every 30 s. Falls back to demo data when offline.
+ * Auto-refreshes every 30 s.
  */
 import { useEffect, useState, useRef } from "react";
 import {
@@ -33,7 +33,7 @@ const co2Color     = (v: number)    => v > 800 ? "#FF4D4D" : v > 600 ? "#FF8C42"
 const co2Label     = (v: number)    => v > 800 ? "DANGER" : v > 600 ? "HIGH" : v > 400 ? "ELEVATED" : "NORMAL";
 const soilColor    = (v: number)    => v < 20 ? "#FF4D4D" : v < 50 ? "#F1B24A" : "#9DC88D";
 const soilLabel    = (v: number)    => v < 20 ? "DRY" : v < 50 ? "LOW" : v < 80 ? "OK" : "WET";
-const rainLabel    = (v: number)    => v < 200 ? "HEAVY" : v < 500 ? "LIGHT" : "NONE";
+const rainLabel    = (v: number)    => v > 5 ? "HEAVY" : v > 1 ? "MODERATE" : v > 0 ? "LIGHT" : "NONE";
 
 /* ── Circular gauge ─────────────────────────────────────────── */
 function MiniGauge({ value, max, color, label, unit }: { value: number; max: number; color: string; label: string; unit: string }) {
@@ -60,45 +60,40 @@ function MiniGauge({ value, max, color, label, unit }: { value: number; max: num
 
 /* ── Build device from grouped readings ─────────────────────── */
 function buildDevice(id: string, rows: SensorReading[], idx: number): IoTDevice {
-  const byType: Record<string, number>  = {};
-  const byBool: Record<string, boolean> = {};
+  const byType: Record<string, number> = {};
   rows.forEach(r => {
     byType[r.sensor_type.toLowerCase()] = r.value;
-    if (r.fire_detected !== undefined) byBool.fire     = r.fire_detected;
-    if (r.is_raining    !== undefined) byBool.rain     = r.is_raining;
-    if (r.soil_dry      !== undefined) byBool.soil_dry = r.soil_dry;
   });
-  const temp  = byType.temperature ?? byType.temp ?? rows[0]?.temperature ?? 0;
-  const hum   = byType.humidity    ?? byType.hum  ?? rows[0]?.humidity    ?? 0;
-  const co2   = byType.co2         ?? rows[0]?.co2_ppm ?? 400;
-  const smoke = byType.smoke       ?? byType.mq135 ?? co2;
-  const rain  = byType.rain        ?? byType.rainfall  ?? byType.yl83 ?? rows[0]?.rain_value ?? 1023;
-  const soil  = byType.soil        ?? byType.moisture   ?? rows[0]?.soil_moisture ?? 50;
+
+  const temp  = byType.temp        ?? byType.temperature ?? 0;
+  const hum   = byType.humidity    ?? byType.hum         ?? 0;
+  const co2   = byType.co2         ?? 400;
+  const smoke = byType.smoke       ?? byType.mq135       ?? co2;
+  const rain  = byType.rain        ?? byType.rainfall    ?? 0;
+  const soil  = byType.soil        ?? byType.moisture    ?? 0;
+
   return {
-    id, name: `ESP32 Node ${idx + 1}`,
+    id,
+    name: `ESP32 Node ${idx + 1}`,
     location: `Zone ${String.fromCharCode(65 + idx)} — Lumbini Forest`,
-    lat: 28.002 + idx * 0.01, lng: 83.036 + idx * 0.01,
-    online: true, battery: 100 - (idx * 11) % 70,
+    lat: 28.002 + idx * 0.01,
+    lng: 83.036 + idx * 0.01,
+    online: true,
+    battery: 100 - (idx * 11) % 70,
     lastSeen: rows[0]?.recorded_at ?? new Date().toISOString(),
-    temperature: temp, humidity: hum,
+    temperature: temp,
+    humidity: hum,
     heatIndex: temp + (hum > 60 ? (hum - 60) * 0.1 : 0),
-    co2, smokePpm: smoke,
-    rainValue: rain, isRaining: byBool.rain ?? rain < 500,
-    soilMoisture: soil, soilDry: byBool.soil_dry ?? soil < 20,
-    fireDetected: byBool.fire ?? (smoke > 300 || co2 > 800),
-    smokeAlert:   smoke > 150 && !(byBool.fire ?? false),
+    co2,
+    smokePpm: smoke,
+    rainValue: rain,
+    isRaining: rain > 0,
+    soilMoisture: soil,
+    soilDry: soil < 20,
+    fireDetected: smoke > 300 || co2 > 800,
+    smokeAlert: smoke > 150 && !(smoke > 300 || co2 > 800),
     alertSent: false,
   };
-}
-
-/* ── Demo fallback ──────────────────────────────────────────── */
-function getDemoDevices(): IoTDevice[] {
-  return [
-    { id:"DEMO-001",name:"ESP32 Node 1",location:"Zone A — East Forest",  lat:28.002,lng:83.036,online:true, battery:87,lastSeen:new Date().toISOString(),temperature:34.5,humidity:42, heatIndex:36.2,co2:412,smokePpm:18, rainValue:900, isRaining:false,soilMoisture:65,soilDry:false,fireDetected:false,smokeAlert:false,alertSent:false},
-    { id:"DEMO-002",name:"ESP32 Node 2",location:"Zone B — North Ridge",  lat:28.013,lng:83.047,online:true, battery:54,lastSeen:new Date().toISOString(),temperature:38.1,humidity:28, heatIndex:40.5,co2:620,smokePpm:180,rainValue:1020,isRaining:false,soilMoisture:20,soilDry:true, fireDetected:false,smokeAlert:true, alertSent:false},
-    { id:"DEMO-003",name:"ESP32 Node 3",location:"Zone C — West Buffer",  lat:28.021,lng:83.025,online:true, battery:22,lastSeen:new Date().toISOString(),temperature:41.7,humidity:19, heatIndex:43.3,co2:850,smokePpm:340,rainValue:1023,isRaining:false,soilMoisture:10,soilDry:true, fireDetected:true, smokeAlert:false,alertSent:false},
-    { id:"DEMO-004",name:"ESP32 Node 4",location:"Zone D — South Path",   lat:27.994,lng:83.042,online:true, battery:91,lastSeen:new Date().toISOString(),temperature:26.3,humidity:78, heatIndex:27.1,co2:390,smokePpm:12, rainValue:120,  isRaining:true, soilMoisture:90,soilDry:false,fireDetected:false,smokeAlert:false,alertSent:false},
-  ];
 }
 
 /* ── Main ───────────────────────────────────────────────────── */
@@ -135,8 +130,12 @@ export default function IoTMonitor() {
         setAlertMsg(`🔥 FIRE DETECTED — Auto-alert sent for: ${names}`);
       }
     } catch {
-      setDevices(getDemoDevices());
-    } finally { setLoading(false); setLastRefresh(new Date().toLocaleTimeString()); }
+      setDevices([]);
+      setReadings([]);
+    } finally {
+      setLoading(false);
+      setLastRefresh(new Date().toLocaleTimeString());
+    }
   };
 
   const manualAlert = async () => {
@@ -145,7 +144,6 @@ export default function IoTMonitor() {
     catch { setAlertMsg("❌ Failed to send alert"); } finally { setSendingAlert(false); }
   };
 
-  /* ── IoT-based prediction ── */
   const predictFromIoT = async () => {
     setPredicting(true);
     setAlertMsg("Running IoT sensor prediction…");
@@ -153,10 +151,7 @@ export default function IoTMonitor() {
       const { API, getAdminKey } = await import("../api");
       const res = await fetch(`${API}/api/ml/predict-iot`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-admin-key": getAdminKey(),
-        },
+        headers: { "Content-Type": "application/json", "x-admin-key": getAdminKey() },
       });
       const data = await res.json();
       if (data.ok && data.prediction) {
@@ -191,15 +186,16 @@ export default function IoTMonitor() {
   const alertCount  = devices.filter(d => d.smokeAlert || d.fireDetected).length;
   const selectedDev = devices.find(d => d.id === selectedId) ?? devices[0] ?? null;
 
-  const card = (extra?: React.CSSProperties): React.CSSProperties => ({ background: "rgba(255,255,255,.05)", border: "1px solid rgba(255,255,255,.09)", borderRadius: 20, padding: "18px 20px", ...extra });
+  const card = (extra?: React.CSSProperties): React.CSSProperties => ({
+    background: "rgba(255,255,255,.05)", border: "1px solid rgba(255,255,255,.09)", borderRadius: 20, padding: "18px 20px", ...extra
+  });
 
-  /* ── Status rows for device detail ── */
   const statusRows = (d: IoTDevice) => [
-    { label: "Fire Detection",    active: d.fireDetected,  color: "#FF4D4D", msg: d.fireDetected   ? "🔥 FIRE DETECTED — Emergency alert sent"                  : "✓ No fire detected",             icon: <Flame    size={14} /> },
-    { label: "CO₂ / Air Quality", active: d.co2 > 600,     color: "#FF8C42", msg: `${co2Label(d.co2)} — ${d.co2} ppm`,                                                                                icon: <Radio    size={14} /> },
-    { label: "Rain Detection",    active: d.isRaining,     color: "#60A5FA", msg: d.isRaining      ? `🌧 Rain detected (raw: ${d.rainValue})`                    : "✓ No rain",                     icon: <CloudRain size={14} /> },
-    { label: "Soil Condition",    active: d.soilDry,       color: "#F1B24A", msg: `${soilLabel(d.soilMoisture)} — ${d.soilMoisture.toFixed(0)}% moisture`,                                             icon: <Leaf     size={14} /> },
-    { label: "Battery",           active: d.battery < 25,  color: "#FF4D4D", msg: d.battery < 25   ? `⚡ Low: ${d.battery}%`                                     : `✓ OK: ${d.battery}%`,           icon: <Battery  size={14} /> },
+    { label: "Fire Detection",    active: d.fireDetected, color: "#FF4D4D", msg: d.fireDetected ? "🔥 FIRE DETECTED — Emergency alert sent" : "✓ No fire detected",          icon: <Flame     size={14} /> },
+    { label: "CO₂ / Air Quality", active: d.co2 > 600,    color: "#FF8C42", msg: `${co2Label(d.co2)} — ${d.co2} ppm`,                                                        icon: <Radio     size={14} /> },
+    { label: "Rain Detection",    active: d.isRaining,    color: "#60A5FA", msg: d.isRaining ? `🌧 Rain detected — ${d.rainValue.toFixed(2)} mm` : "✓ No rain",              icon: <CloudRain size={14} /> },
+    { label: "Soil Condition",    active: d.soilDry,      color: "#F1B24A", msg: `${soilLabel(d.soilMoisture)} — ${d.soilMoisture.toFixed(0)}% moisture`,                    icon: <Leaf      size={14} /> },
+    { label: "Battery",           active: d.battery < 25, color: "#FF4D4D", msg: d.battery < 25 ? `⚡ Low: ${d.battery}%` : `✓ OK: ${d.battery}%`,                          icon: <Battery   size={14} /> },
   ];
 
   if (loading) return (
@@ -231,13 +227,11 @@ export default function IoTMonitor() {
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn btn-green"  onClick={fetchDevices}><RefreshCw size={12} />{!isMobile && " Refresh"}</button>
-            <button className="btn btn-amber"  onClick={predictFromIoT} disabled={predicting} title="Predict fire risk from current sensor readings">
-              {predicting
-                ? <><RefreshCw size={12} className="spin" />{!isMobile && " Predicting…"}</>
-                : <>{!isMobile ? "🧠 Predict Risk" : "🧠"}</>}
+            <button className="btn btn-amber"  onClick={predictFromIoT} disabled={predicting}>
+              {predicting ? <><RefreshCw size={12} className="spin" />{!isMobile && " Predicting…"}</> : <>{!isMobile ? "🧠 Predict Risk" : "🧠"}</>}
             </button>
-            <button className="btn btn-blue"   onClick={testAlert}    disabled={sendingAlert}><Zap  size={12} />{!isMobile && " Test"}</button>
-            <button className="btn btn-orange" onClick={manualAlert}  disabled={sendingAlert}>
+            <button className="btn btn-blue"   onClick={testAlert}   disabled={sendingAlert}><Zap  size={12} />{!isMobile && " Test"}</button>
+            <button className="btn btn-orange" onClick={manualAlert} disabled={sendingAlert}>
               <Bell size={12} style={{ animation: sendingAlert ? "spin .8s linear infinite" : "none" }} />
               {!isMobile && (sendingAlert ? " Sending…" : " Alert")}
             </button>
@@ -246,7 +240,7 @@ export default function IoTMonitor() {
 
         <main style={{ flex: 1, padding: isMobile ? 16 : 24, display: "flex", flexDirection: "column", gap: isMobile ? 14 : 20, overflowY: "auto" }}>
 
-          {/* IoT Prediction result banner */}
+          {/* IoT Prediction banner */}
           {iotPrediction && (
             <div style={{
               padding: "14px 18px", borderRadius: 16,
@@ -263,7 +257,7 @@ export default function IoTMonitor() {
                     IoT Prediction: {iotPrediction.risk_label} Risk
                   </div>
                   <div style={{ fontSize: 12, color: "rgba(255,255,255,.55)", marginTop: 2 }}>
-                    Confidence: {(iotPrediction.risk_probability * 100).toFixed(0)}% · Based on live ESP32 sensor readings · Stored separately from weather forecast
+                    Confidence: {(iotPrediction.risk_probability * 100).toFixed(0)}% · Based on live ESP32 sensor readings
                   </div>
                 </div>
               </div>
@@ -297,8 +291,8 @@ export default function IoTMonitor() {
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4,1fr)", gap: isMobile ? 10 : 14 }}>
             {[
               { label: "Devices Online", val: `${onlineCount}/${devices.length}`, color: "#9DC88D", icon: <Wifi size={18} /> },
-              { label: "Fire Alerts",    val: fireCount,  color: "#FF4D4D", icon: <Flame       size={18} /> },
-              { label: "Rain Detected",  val: rainCount,  color: "#60A5FA", icon: <CloudRain   size={18} /> },
+              { label: "Fire Alerts",    val: fireCount,  color: "#FF4D4D", icon: <Flame         size={18} /> },
+              { label: "Rain Detected",  val: rainCount,  color: "#60A5FA", icon: <CloudRain     size={18} /> },
               { label: "Active Alerts",  val: alertCount, color: "#FF8C42", icon: <AlertTriangle size={18} /> },
             ].map(s => (
               <div key={s.label} style={{ background: "rgba(255,255,255,.05)", border: `1px solid ${typeof s.val === "number" && s.val > 0 && s.color !== "#9DC88D" ? s.color + "35" : "rgba(255,255,255,.09)"}`, borderRadius: 18, padding: 16 }}>
@@ -309,15 +303,21 @@ export default function IoTMonitor() {
             ))}
           </div>
 
+          {/* No devices state */}
+          {devices.length === 0 && !loading && (
+            <div style={{ ...card(), textAlign: "center", padding: "48px 24px" }}>
+              <WifiOff size={40} color="rgba(255,255,255,.15)" style={{ marginBottom: 16 }} />
+              <div style={{ fontSize: 16, fontWeight: 700, color: "rgba(255,255,255,.4)", marginBottom: 8 }}>No Devices Connected</div>
+              <div style={{ fontSize: 13, color: "rgba(255,255,255,.25)" }}>Waiting for ESP32 to send data to /api/sensor/ingest</div>
+            </div>
+          )}
+
           {/* Device list + detail */}
-          {isMobile ? (
-            /* Mobile: tappable list → bottom sheet */
-            <>
-              <div style={card()}>
-                <div className="label-caps" style={{ marginBottom: 14 }}>ESP32 Sensor Nodes</div>
-                {devices.length === 0 ? (
-                  <div style={{ textAlign: "center", padding: "28px 0", color: "rgba(255,255,255,.3)", fontSize: 13 }}>No sensor data. POST to /api/sensor/ingest</div>
-                ) : (
+          {devices.length > 0 && (
+            isMobile ? (
+              <>
+                <div style={card()}>
+                  <div className="label-caps" style={{ marginBottom: 14 }}>ESP32 Sensor Nodes</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     {devices.map(d => {
                       const col = statusColor(d);
@@ -332,7 +332,7 @@ export default function IoTMonitor() {
                               <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>{d.location}</div>
                             </div>
                             <div style={{ display: "flex", gap: 5 }}>
-                              {d.fireDetected && <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 999, background: "rgba(255,77,77,.2)", color: "#FF4D4D", fontWeight: 700 }}>FIRE</span>}
+                              {d.fireDetected && <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 999, background: "rgba(255,77,77,.2)",  color: "#FF4D4D", fontWeight: 700 }}>FIRE</span>}
                               {d.smokeAlert   && <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 999, background: "rgba(255,140,66,.2)", color: "#FF8C42", fontWeight: 700 }}>CO2</span>}
                               {d.isRaining    && <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 999, background: "rgba(96,165,250,.2)", color: "#60A5FA", fontWeight: 700 }}>RAIN</span>}
                             </div>
@@ -342,54 +342,52 @@ export default function IoTMonitor() {
                             <span style={{ color: "#60A5FA" }}>{d.humidity.toFixed(0)}%</span>
                             <span style={{ color: co2Color(d.co2) }}>CO₂ {d.co2}ppm</span>
                             <span style={{ color: soilColor(d.soilMoisture) }}>Soil {d.soilMoisture.toFixed(0)}%</span>
+                            <span style={{ color: "#60A5FA" }}>Rain {d.rainValue.toFixed(2)}mm</span>
                             <span style={{ color: batteryColor(d.battery), display: "flex", alignItems: "center", gap: 2 }}><Battery size={10} />{d.battery}%</span>
                           </div>
                         </div>
                       );
                     })}
                   </div>
-                )}
-              </div>
+                </div>
 
-              {/* Mobile bottom sheet */}
-              {showSheet && selectedDev && (
-                <>
-                  <div onClick={() => setShowSheet(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", zIndex: 60, backdropFilter: "blur(4px)" }} />
-                  <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 70, background: "rgba(8,22,18,.98)", borderRadius: "20px 20px 0 0", padding: "20px 20px 32px", maxHeight: "80vh", overflowY: "auto", border: "1px solid rgba(255,255,255,.1)" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                      <div><div style={{ fontSize: 17, fontWeight: 900 }}>{selectedDev.name}</div><div style={{ fontSize: 12, color: "rgba(255,255,255,.4)" }}>{selectedDev.location}</div></div>
-                      <button onClick={() => setShowSheet(false)} style={{ background: "rgba(255,255,255,.08)", border: "none", borderRadius: 10, width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", cursor: "pointer" }}><X size={18} /></button>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-around", padding: "14px 0", borderTop: "1px solid rgba(255,255,255,.07)", borderBottom: "1px solid rgba(255,255,255,.07)", marginBottom: 16 }}>
-                      <MiniGauge value={selectedDev.temperature}  max={60}   color="#FF8C42"                          label="Temp" unit="°C" />
-                      <MiniGauge value={selectedDev.humidity}     max={100}  color="#60A5FA"                          label="Hum"  unit="%" />
-                      <MiniGauge value={selectedDev.co2}          max={1000} color={co2Color(selectedDev.co2)}        label="CO₂"  unit="ppm" />
-                      <MiniGauge value={selectedDev.soilMoisture} max={100}  color={soilColor(selectedDev.soilMoisture)} label="Soil" unit="%" />
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {statusRows(selectedDev).map(st => (
-                        <div key={st.label} style={{ padding: "12px 14px", borderRadius: 12, background: st.active ? `${st.color}12` : "rgba(157,200,141,.07)", border: `1px solid ${st.active ? st.color + "35" : "rgba(157,200,141,.2)"}`, display: "flex", alignItems: "center", gap: 10 }}>
-                          <div style={{ color: st.active ? st.color : "#9DC88D" }}>{st.icon}</div>
-                          <div>
-                            <div className="label-caps" style={{ fontSize: 9, marginBottom: 2 }}>{st.label}</div>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: st.active ? st.color : "#9DC88D" }}>{st.msg}</div>
+                {/* Mobile bottom sheet */}
+                {showSheet && selectedDev && (
+                  <>
+                    <div onClick={() => setShowSheet(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", zIndex: 60, backdropFilter: "blur(4px)" }} />
+                    <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 70, background: "rgba(8,22,18,.98)", borderRadius: "20px 20px 0 0", padding: "20px 20px 32px", maxHeight: "80vh", overflowY: "auto", border: "1px solid rgba(255,255,255,.1)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                        <div><div style={{ fontSize: 17, fontWeight: 900 }}>{selectedDev.name}</div><div style={{ fontSize: 12, color: "rgba(255,255,255,.4)" }}>{selectedDev.location}</div></div>
+                        <button onClick={() => setShowSheet(false)} style={{ background: "rgba(255,255,255,.08)", border: "none", borderRadius: 10, width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", cursor: "pointer" }}><X size={18} /></button>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-around", padding: "14px 0", borderTop: "1px solid rgba(255,255,255,.07)", borderBottom: "1px solid rgba(255,255,255,.07)", marginBottom: 16 }}>
+                        <MiniGauge value={selectedDev.temperature}  max={60}   color="#FF8C42"                             label="Temp" unit="°C" />
+                        <MiniGauge value={selectedDev.humidity}     max={100}  color="#60A5FA"                             label="Hum"  unit="%" />
+                        <MiniGauge value={selectedDev.co2}          max={1000} color={co2Color(selectedDev.co2)}           label="CO₂"  unit="ppm" />
+                        <MiniGauge value={selectedDev.soilMoisture} max={100}  color={soilColor(selectedDev.soilMoisture)} label="Soil" unit="%" />
+                        <MiniGauge value={selectedDev.rainValue}    max={50}   color="#60A5FA"                             label="Rain" unit="mm" />
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {statusRows(selectedDev).map(st => (
+                          <div key={st.label} style={{ padding: "12px 14px", borderRadius: 12, background: st.active ? `${st.color}12` : "rgba(157,200,141,.07)", border: `1px solid ${st.active ? st.color + "35" : "rgba(157,200,141,.2)"}`, display: "flex", alignItems: "center", gap: 10 }}>
+                            <div style={{ color: st.active ? st.color : "#9DC88D" }}>{st.icon}</div>
+                            <div>
+                              <div className="label-caps" style={{ fontSize: 9, marginBottom: 2 }}>{st.label}</div>
+                              <div style={{ fontSize: 13, fontWeight: 600, color: st.active ? st.color : "#9DC88D" }}>{st.msg}</div>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                </>
-              )}
-            </>
-          ) : (
-            /* Desktop: side-by-side list + detail panel */
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1.3fr", gap: 20 }}>
-              {/* Device list */}
-              <div style={card()}>
-                <div className="label-caps" style={{ marginBottom: 14 }}>ESP32 Sensor Nodes</div>
-                {devices.length === 0 ? (
-                  <div style={{ textAlign: "center", padding: "28px 0", color: "rgba(255,255,255,.3)", fontSize: 13 }}>No sensor data.<br /><span style={{ fontSize: 11, opacity: 0.7 }}>POST to /api/sensor/ingest</span></div>
-                ) : (
+                  </>
+                )}
+              </>
+            ) : (
+              /* Desktop */
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1.3fr", gap: 20 }}>
+                {/* Device list */}
+                <div style={card()}>
+                  <div className="label-caps" style={{ marginBottom: 14 }}>ESP32 Sensor Nodes</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     {devices.map(d => {
                       const col    = statusColor(d);
@@ -403,7 +401,7 @@ export default function IoTMonitor() {
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                               <div style={{ fontSize: 14, fontWeight: 700 }}>{d.name}</div>
                               <div style={{ display: "flex", gap: 5 }}>
-                                {d.fireDetected && <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 999, background: "rgba(255,77,77,.2)", color: "#FF4D4D", fontWeight: 700 }}>FIRE</span>}
+                                {d.fireDetected && <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 999, background: "rgba(255,77,77,.2)",  color: "#FF4D4D", fontWeight: 700 }}>FIRE</span>}
                                 {d.smokeAlert   && <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 999, background: "rgba(255,140,66,.2)", color: "#FF8C42", fontWeight: 700 }}>CO2↑</span>}
                                 {d.isRaining    && <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 999, background: "rgba(96,165,250,.2)", color: "#60A5FA", fontWeight: 700 }}>RAIN</span>}
                               </div>
@@ -414,6 +412,7 @@ export default function IoTMonitor() {
                               <span style={{ color: "#60A5FA" }}>{d.humidity.toFixed(0)}%</span>
                               <span style={{ color: co2Color(d.co2) }}>CO₂ {d.co2}ppm</span>
                               <span style={{ color: soilColor(d.soilMoisture) }}>Soil {d.soilMoisture.toFixed(0)}%</span>
+                              <span style={{ color: "#60A5FA" }}>Rain {d.rainValue.toFixed(2)}mm</span>
                               <span style={{ color: batteryColor(d.battery), display: "flex", alignItems: "center", gap: 2 }}><Battery size={10} />{d.battery}%</span>
                             </div>
                           </div>
@@ -421,68 +420,68 @@ export default function IoTMonitor() {
                       );
                     })}
                   </div>
+                </div>
+
+                {/* Device detail */}
+                {selectedDev ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                    <div style={{ ...card(), border: `1px solid ${statusColor(selectedDev)}35` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+                        <div>
+                          <div style={{ fontSize: 17, fontWeight: 900 }}>{selectedDev.name}</div>
+                          <div style={{ fontSize: 12, color: "rgba(255,255,255,.4)", marginTop: 3, display: "flex", alignItems: "center", gap: 5 }}><MapPin size={10} /> {selectedDev.location}</div>
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 5 }}>
+                          <span style={{ padding: "4px 10px", borderRadius: 999, fontSize: 12, fontWeight: 700, background: "rgba(157,200,141,.15)", color: "#9DC88D", border: "1px solid rgba(157,200,141,.3)" }}>● Online</span>
+                          <div style={{ fontSize: 11, color: "rgba(255,255,255,.35)", display: "flex", alignItems: "center", gap: 4 }}><Clock size={10} /> {new Date(selectedDev.lastSeen).toLocaleTimeString()}</div>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-around", padding: "14px 0", borderTop: "1px solid rgba(255,255,255,.07)", borderBottom: "1px solid rgba(255,255,255,.07)", marginBottom: 16 }}>
+                        <MiniGauge value={selectedDev.temperature}  max={60}   color="#FF8C42"                             label="Temp"  unit="°C" />
+                        <MiniGauge value={selectedDev.humidity}     max={100}  color="#60A5FA"                             label="Hum"   unit="%" />
+                        <MiniGauge value={selectedDev.co2}          max={1000} color={co2Color(selectedDev.co2)}           label="CO₂"   unit="ppm" />
+                        <MiniGauge value={selectedDev.soilMoisture} max={100}  color={soilColor(selectedDev.soilMoisture)} label="Soil"  unit="%" />
+                        <MiniGauge value={selectedDev.rainValue}    max={50}   color="#60A5FA"                             label="Rain"  unit="mm" />
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10 }}>
+                        {[
+                          { label: "Temperature",   val: `${selectedDev.temperature.toFixed(1)}°C`,                                   color: "#FF8C42",                        icon: <Thermometer size={12} /> },
+                          { label: "Humidity",      val: `${selectedDev.humidity.toFixed(0)}%`,                                        color: "#60A5FA",                        icon: <Droplets    size={12} /> },
+                          { label: "Heat Index",    val: `${selectedDev.heatIndex.toFixed(1)}°C`,                                      color: "#F1B24A",                        icon: <Thermometer size={12} /> },
+                          { label: "CO₂ (MQ-135)", val: `${selectedDev.co2} ppm`,                                                     color: co2Color(selectedDev.co2),        icon: <Radio       size={12} /> },
+                          { label: "Rain (YL-83)",  val: `${rainLabel(selectedDev.rainValue)} (${selectedDev.rainValue.toFixed(2)} mm)`, color: "#60A5FA",                       icon: <CloudRain   size={12} /> },
+                          { label: "Soil Moisture", val: `${soilLabel(selectedDev.soilMoisture)} ${selectedDev.soilMoisture.toFixed(0)}%`, color: soilColor(selectedDev.soilMoisture), icon: <Leaf   size={12} /> },
+                        ].map(s => (
+                          <div key={s.label} style={{ padding: "11px 12px", borderRadius: 12, background: "rgba(255,255,255,.04)", border: `1px solid ${s.color}22` }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 5, color: s.color }}>{s.icon}<span style={{ fontSize: 9, color: "rgba(255,255,255,.4)", textTransform: "uppercase" }}>{s.label}</span></div>
+                            <div style={{ fontSize: 15, fontWeight: 800, color: s.color }}>{s.val}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div style={{ ...card(), padding: "16px 18px" }}>
+                      <div className="label-caps" style={{ marginBottom: 12 }}>Detection Status</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {statusRows(selectedDev).map(st => (
+                          <div key={st.label} style={{ padding: "11px 14px", borderRadius: 12, background: st.active ? `${st.color}12` : "rgba(157,200,141,.07)", border: `1px solid ${st.active ? st.color + "35" : "rgba(157,200,141,.2)"}`, display: "flex", alignItems: "center", gap: 10 }}>
+                            <div style={{ color: st.active ? st.color : "#9DC88D" }}>{st.icon}</div>
+                            <div>
+                              <div className="label-caps" style={{ fontSize: 9, marginBottom: 2 }}>{st.label}</div>
+                              <div style={{ fontSize: 13, fontWeight: 600, color: st.active ? st.color : "#9DC88D" }}>{st.msg}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ ...card(), display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12 }}>
+                    <Wifi size={32} color="rgba(255,255,255,.15)" />
+                    <div style={{ fontSize: 13, color: "rgba(255,255,255,.3)" }}>Select a device to view details</div>
+                  </div>
                 )}
               </div>
-
-              {/* Device detail */}
-              {selectedDev ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                  <div style={{ ...card(), border: `1px solid ${statusColor(selectedDev)}35` }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
-                      <div>
-                        <div style={{ fontSize: 17, fontWeight: 900 }}>{selectedDev.name}</div>
-                        <div style={{ fontSize: 12, color: "rgba(255,255,255,.4)", marginTop: 3, display: "flex", alignItems: "center", gap: 5 }}><MapPin size={10} /> {selectedDev.location}</div>
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 5 }}>
-                        <span style={{ padding: "4px 10px", borderRadius: 999, fontSize: 12, fontWeight: 700, background: "rgba(157,200,141,.15)", color: "#9DC88D", border: "1px solid rgba(157,200,141,.3)" }}>● Online</span>
-                        <div style={{ fontSize: 11, color: "rgba(255,255,255,.35)", display: "flex", alignItems: "center", gap: 4 }}><Clock size={10} /> {new Date(selectedDev.lastSeen).toLocaleTimeString()}</div>
-                      </div>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-around", padding: "14px 0", borderTop: "1px solid rgba(255,255,255,.07)", borderBottom: "1px solid rgba(255,255,255,.07)", marginBottom: 16 }}>
-                      <MiniGauge value={selectedDev.temperature}  max={60}   color="#FF8C42"                              label="Temp"  unit="°C" />
-                      <MiniGauge value={selectedDev.humidity}     max={100}  color="#60A5FA"                              label="Hum"   unit="%" />
-                      <MiniGauge value={selectedDev.co2}          max={1000} color={co2Color(selectedDev.co2)}            label="CO₂"   unit="ppm" />
-                      <MiniGauge value={selectedDev.soilMoisture} max={100}  color={soilColor(selectedDev.soilMoisture)}  label="Soil"  unit="%" />
-                      <MiniGauge value={1023 - selectedDev.rainValue} max={1023} color="#60A5FA"                          label="Rain"  unit="wet" />
-                    </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10 }}>
-                      {[
-                        { label: "Temperature",    val: `${selectedDev.temperature.toFixed(1)}°C`, color: "#FF8C42", icon: <Thermometer size={12} /> },
-                        { label: "Humidity",       val: `${selectedDev.humidity.toFixed(0)}%`,     color: "#60A5FA", icon: <Droplets   size={12} /> },
-                        { label: "Heat Index",     val: `${selectedDev.heatIndex.toFixed(1)}°C`,   color: "#F1B24A", icon: <Thermometer size={12} /> },
-                        { label: "CO₂ (MQ-135)",  val: `${selectedDev.co2} ppm`,                  color: co2Color(selectedDev.co2), icon: <Radio size={12} /> },
-                        { label: "Rain (YL-83)",   val: `${rainLabel(selectedDev.rainValue)} (${selectedDev.rainValue})`, color: "#60A5FA", icon: <CloudRain size={12} /> },
-                        { label: "Soil Moisture",  val: `${soilLabel(selectedDev.soilMoisture)} ${selectedDev.soilMoisture.toFixed(0)}%`, color: soilColor(selectedDev.soilMoisture), icon: <Leaf size={12} /> },
-                      ].map(s => (
-                        <div key={s.label} style={{ padding: "11px 12px", borderRadius: 12, background: "rgba(255,255,255,.04)", border: `1px solid ${s.color}22` }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 5, color: s.color }}>{s.icon}<span style={{ fontSize: 9, color: "rgba(255,255,255,.4)", textTransform: "uppercase" }}>{s.label}</span></div>
-                          <div style={{ fontSize: 15, fontWeight: 800, color: s.color }}>{s.val}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  <div style={{ ...card(), padding: "16px 18px" }}>
-                    <div className="label-caps" style={{ marginBottom: 12 }}>Detection Status</div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {statusRows(selectedDev).map(st => (
-                        <div key={st.label} style={{ padding: "11px 14px", borderRadius: 12, background: st.active ? `${st.color}12` : "rgba(157,200,141,.07)", border: `1px solid ${st.active ? st.color + "35" : "rgba(157,200,141,.2)"}`, display: "flex", alignItems: "center", gap: 10 }}>
-                          <div style={{ color: st.active ? st.color : "#9DC88D" }}>{st.icon}</div>
-                          <div>
-                            <div className="label-caps" style={{ fontSize: 9, marginBottom: 2 }}>{st.label}</div>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: st.active ? st.color : "#9DC88D" }}>{st.msg}</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div style={{ ...card(), display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12 }}>
-                  <Wifi size={32} color="rgba(255,255,255,.15)" />
-                  <div style={{ fontSize: 13, color: "rgba(255,255,255,.3)" }}>Select a device to view details</div>
-                </div>
-              )}
-            </div>
+            )
           )}
 
           {/* Raw readings table */}
@@ -510,7 +509,7 @@ export default function IoTMonitor() {
                           <td style={{ padding: "9px 10px", fontSize: 12, color: "#FF8C42" }}>{r.temperature != null ? `${r.temperature.toFixed(1)}°` : "—"}</td>
                           <td style={{ padding: "9px 10px", fontSize: 12, color: "#60A5FA" }}>{r.humidity     != null ? `${r.humidity.toFixed(0)}%`     : "—"}</td>
                           <td style={{ padding: "9px 10px", fontSize: 12, color: co2Color(r.co2_ppm ?? 0) }}>{r.co2_ppm != null ? r.co2_ppm : "—"}</td>
-                          <td style={{ padding: "9px 10px", fontSize: 12, color: "#60A5FA" }}>{r.rain_value != null ? rainLabel(r.rain_value) : "—"}</td>
+                          <td style={{ padding: "9px 10px", fontSize: 12, color: "#60A5FA" }}>{r.rain_value != null ? `${Number(r.rain_value).toFixed(2)} mm` : "—"}</td>
                           <td style={{ padding: "9px 10px", fontSize: 12, color: soilColor(r.soil_moisture ?? 50) }}>{r.soil_moisture != null ? `${r.soil_moisture.toFixed(0)}%` : "—"}</td>
                           <td style={{ padding: "9px 10px" }}><span style={{ padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 700, background: `${fc}18`, color: fc, border: `1px solid ${fc}30` }}>{r.fire_detected ? "🔥 YES" : "CLEAR"}</span></td>
                         </tr>
@@ -522,27 +521,6 @@ export default function IoTMonitor() {
             </div>
           )}
 
-          {/* Demo mode notice */}
-          {devices.length > 0 && devices[0].id.startsWith("DEMO") && (
-            <div style={{ padding: "16px 20px", borderRadius: 14, background: "rgba(96,165,250,.08)", border: "1px solid rgba(96,165,250,.25)", fontSize: 13, color: "rgba(255,255,255,.7)" }}>
-              <div style={{ fontWeight: 700, color: "#60A5FA", marginBottom: 10 }}>ℹ Demo Mode — Connect your ESP32</div>
-              <div style={{ fontSize: 12, color: "rgba(255,255,255,.5)", lineHeight: 1.8 }}>
-                Send sensor data to: <code style={{ background: "rgba(255,255,255,.08)", padding: "2px 8px", borderRadius: 4, color: "#9DC88D" }}>POST http://&lt;YOUR-IP&gt;/api/sensor/ingest</code>
-              </div>
-              <pre style={{ background: "rgba(0,0,0,.3)", borderRadius: 10, padding: "12px 14px", fontSize: 11, color: "#9DC88D", marginTop: 10, overflowX: "auto" }}>{`{
-  "device_id": "ESP32-001",
-  "seq": 1,
-  "measured_at": "2026-04-05T10:30:00",
-  "readings": [
-    { "sensor_id":"S1","sensor_type":"temperature","value":34.5,"unit":"C" },
-    { "sensor_id":"S2","sensor_type":"humidity",   "value":42.0,"unit":"%" },
-    { "sensor_id":"S3","sensor_type":"co2",        "value":450, "unit":"ppm" },
-    { "sensor_id":"S4","sensor_type":"rain",       "value":800, "unit":"raw" },
-    { "sensor_id":"S5","sensor_type":"soil",       "value":65,  "unit":"%" }
-  ]
-}`}</pre>
-            </div>
-          )}
         </main>
       </div>
     </div>
