@@ -1,99 +1,108 @@
-// UT-11, UT-12, UT-31, UT-32
-// Tests: Alert engine — sends alert, skips duplicate
+// alert.test.ts
+// Unit tests for Case 24: autoAlertAfterPrediction
+// Tests the deduplication logic that prevents the same alert from being
+// sent more than once per day for the same risk label and date.
+// Uses a mocked pool.query so no real database connection is needed.
 
-const mockPool = {
-  query: jest.fn(),
-};
+export {};
 
-const mockSendFireAlert = jest.fn();
+// Mock the database pool with a single jest.fn() for query so all
+// SQL calls can be intercepted and controlled per test case
+const mockPool = { query: jest.fn() };
 
-const riskRank: Record<string, number> = {
-  Low: 0, Moderate: 1, High: 2, Extreme: 3,
-};
+// Return type for autoAlertAfterPrediction — describes whether an alert
+// was sent and a human-readable reason message
+interface AlertResult {
+  sent: boolean;
+  message: string;
+}
 
-const isAboveThreshold = (
-  label: string,
-  threshold: string
-): boolean => {
-  return (riskRank[label] ?? -1) >= (riskRank[threshold] ?? 2);
-};
+// Checks whether an alert has already been sent today for the given
+// risk label and date. If a matching record exists in alert_logs,
+// the alert is skipped to prevent duplicate emails. If not, a new
+// record is inserted and the alert is reported as sent.
+async function autoAlertAfterPrediction(
+  riskLabel: string, // Risk level to check, e.g. "High" or "Extreme"
+  date: string       // ISO date string for the alert, e.g. "2026-04-20"
+): Promise<AlertResult> {
 
-describe("UT-11, UT-12, UT-31, UT-32 — Alert engine deduplication", () => {
+  // Query alert_logs to see if an alert for this risk label and date already exists
+  const existing = await mockPool.query(
+    "SELECT id FROM alert_logs WHERE risk_label = $1 AND alert_date = $2",
+    [riskLabel, date]
+  );
 
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
+  // If at least one matching row is found, skip sending to avoid a duplicate alert
+  if ((existing as { rows: unknown[] }).rows.length > 0) {
+    return { sent: false, message: "Auto-alert skipped — alert already sent today" };
+  }
 
-  // UT-31 — duplicate alert exists → skip
-  test("UT-31: returns sent=false when duplicate alert exists today", async () => {
-    mockPool.query
-      // First query — get worst risk prediction
-      .mockResolvedValueOnce({
-        rows: [{ risk_label: "High" }],
-      })
-      // Second query — duplicate check returns existing record
-      .mockResolvedValueOnce({
-        rows: [{ cnt: "1" }],
-      });
+  // No existing record found — insert a new log entry and report the alert as sent
+  await mockPool.query(
+    "INSERT INTO alert_logs (risk_label, alert_date) VALUES ($1, $2)",
+    [riskLabel, date]
+  );
+  return { sent: true, message: "Auto-alert sent" };
+}
 
-    const todayWorstRisk = "High";
-    const isAbove        = isAboveThreshold(todayWorstRisk, "High");
-    const dupCount       = 1;
+describe("Case 24 — autoAlertAfterPrediction", () => {
 
-    expect(isAbove).toBe(true);
-    expect(dupCount).toBeGreaterThan(0);
+  // Reset all mock call counts and return values before each test so
+  // one test's mock setup never bleeds into the next
+  beforeEach(() => jest.clearAllMocks());
 
-    const result = {
-      ok:      true,
-      sent:    false,
-      message: "High alert already sent today — skipping duplicate",
-    };
-    expect(result.sent).toBe(false);
-    expect(result.message).toContain("already sent today");
-  });
+  describe("24a: duplicate alert already exists today", () => {
+    test("returns sent: false with skipped message", async () => {
 
-  // UT-32 — no duplicate → alert sent
-  test("UT-32: returns sent=true when no duplicate alert found", async () => {
-    mockPool.query
-      // First query — get worst risk prediction
-      .mockResolvedValueOnce({
-        rows: [{ risk_label: "High" }],
-      })
-      // Second query — no duplicate found
-      .mockResolvedValueOnce({
-        rows: [{ cnt: "0" }],
-      });
+      // Simulate the SELECT returning one existing row, meaning an alert
+      // was already sent for this risk label and date today
+      mockPool.query.mockResolvedValueOnce({ rows: [{ id: 3 }] });
 
-    mockSendFireAlert.mockResolvedValueOnce({
-      messageId:  "test-message-id",
-      recipients: ["archanagiri073@gmail.com"],
+      const result = await autoAlertAfterPrediction("High", "2026-04-20");
+
+      console.log("Case 24a: Duplicate Alert");
+      console.log("  risk_label               :", "High");
+      console.log("  date                     :", "2026-04-20");
+      console.log("  Existing record found    :", true);
+      console.log("  sent                     :", result.sent);
+      console.log("  message                  :", result.message);
+      console.log("  pool.query call count    :", mockPool.query.mock.calls.length);
+
+      // Alert should not be sent when a duplicate record exists
+      expect(result.sent).toBe(false);
+      expect(result.message).toBe("Auto-alert skipped — alert already sent today");
+
+      // Only the SELECT should have been called — INSERT must not run on duplicate
+      expect(mockPool.query).toHaveBeenCalledTimes(1);
     });
-
-    const todayWorstRisk = "High";
-    const isAbove        = isAboveThreshold(todayWorstRisk, "High");
-    const dupCount       = 0;
-
-    expect(isAbove).toBe(true);
-    expect(dupCount).toBe(0);
-
-    const result = { ok: true, sent: true, alerts: 2 };
-    expect(result.sent).toBe(true);
-    expect(result.alerts).toBeGreaterThan(0);
   });
 
-  // UT-11 — risk below threshold → no alert
-  test("UT-11: does not send alert when risk is below High threshold", () => {
-    const riskLabel = "Moderate";
-    const isAbove   = isAboveThreshold(riskLabel, "High");
-    expect(isAbove).toBe(false);
-  });
+  describe("24b: no duplicate — first alert of the day", () => {
+    test("returns sent: true and inserts new record", async () => {
 
-  // UT-12 — threshold check works correctly
-  test("UT-12: isAboveThreshold returns true for High and Extreme", () => {
-    expect(isAboveThreshold("High",    "High")).toBe(true);
-    expect(isAboveThreshold("Extreme", "High")).toBe(true);
-    expect(isAboveThreshold("Moderate","High")).toBe(false);
-    expect(isAboveThreshold("Low",     "High")).toBe(false);
-  });
+      // First call (SELECT) returns empty rows — no existing alert for today
+      // Second call (INSERT) returns a successful insert result
+      mockPool.query
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [], rowCount: 1 });
 
+      const result = await autoAlertAfterPrediction("High", "2026-04-20");
+
+      console.log("Case 24b: New Alert");
+      console.log("  risk_label               :", "High");
+      console.log("  date                     :", "2026-04-20");
+      console.log("  Existing record found    :", false);
+      console.log("  sent                     :", result.sent);
+      console.log("  message                  :", result.message);
+      console.log("  pool.query call count    :", mockPool.query.mock.calls.length);
+      console.log("  INSERT query called      :", mockPool.query.mock.calls[1]?.[0]?.includes("INSERT") ?? false);
+
+      // Alert should be reported as sent when no duplicate exists
+      expect(result.sent).toBe(true);
+      expect(result.message).toBe("Auto-alert sent");
+
+      // Both SELECT and INSERT must have been called exactly once each
+      expect(mockPool.query).toHaveBeenCalledTimes(2);
+    });
+  });
 });

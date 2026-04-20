@@ -1,4 +1,10 @@
-import { pool } from "../db";
+// alertEngine.service.ts
+// Core alert logic for the fire risk monitoring system.
+// Handles querying predictions, building and sending alert emails,
+// logging alerts to the database, and deduplicating daily alerts.
+// Used by alerts.routes.ts and ml.routes.ts.
+
+import { pool }   from "../db";
 import { config } from "../config";
 import {
   sendFireAlert,
@@ -7,50 +13,60 @@ import {
   sendEmailAlert,
 } from "./email.service";
 
-// ── Risk ranking ───────────────────────────────────────────────────────────
+
+// Numeric rank for each risk level used to compare against the minRisk threshold.
+// Higher number = higher severity. Matches RISK_RANK in email_helpers.py.
 const riskRank: Record<string, number> = {
   Low: 0, Moderate: 1, High: 2, Extreme: 3,
 };
 
+// Returns true if the given risk label meets or exceeds the threshold level.
+// Unknown labels are assigned -1 so they never trigger an alert.
 function isAboveThreshold(label: string, threshold: "High" | "Extreme"): boolean {
   return (riskRank[label] ?? -1) >= (riskRank[threshold] ?? 2);
 }
 
-// ── Nepal date helper ──────────────────────────────────────────────────────
-// Returns today's date as YYYY-MM-DD in Nepal Standard Time (UTC+5:45)
+
+// Returns today's date as a YYYY-MM-DD string in Nepal Standard Time (UTC+5:45).
+// Used for alert deduplication because PostgreSQL CURRENT_DATE is UTC — Nepal is
+// UTC+5:45 so a date comparison using CURRENT_DATE can mismatch by one day near midnight.
 function getTodayNepal(): string {
-  const now = new Date();
-  const nepalOffset = 5 * 60 + 45; // 345 minutes
-  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
-  const nepalMs = utcMs + nepalOffset * 60000;
-  const nepalDate = new Date(nepalMs);
+  const now         = new Date();
+  const nepalOffset = 5 * 60 + 45;  // Nepal Standard Time offset in minutes (345)
+  const utcMs       = now.getTime() + now.getTimezoneOffset() * 60000;
+  const nepalMs     = utcMs + nepalOffset * 60000;
+  const nepalDate   = new Date(nepalMs);
   const y = nepalDate.getFullYear();
   const m = String(nepalDate.getMonth() + 1).padStart(2, "0");
   const d = String(nepalDate.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
 }
 
-// ── Types ──────────────────────────────────────────────────────────────────
+
+// Represents a single high-risk prediction day included in an alert email
 export interface AlertDay {
-  date:             string;
-  risk_label:       string;
-  risk_probability: number;
+  date:             string;  // YYYY-MM-DD
+  risk_label:       string;  // e.g. "High" or "Extreme"
+  risk_probability: number;  // Classifier confidence score 0.0 to 1.0
 }
 
+// Standard return shape for all alert functions
 export interface AlertResult {
   ok:          boolean;
   message?:    string;
-  alerts?:     number;
-  sent?:       boolean;
+  alerts?:     number;       // Number of high-risk days included in the alert
+  sent?:       boolean;      // Whether an email was actually dispatched
   recipients?: string[];
-  days?:       AlertDay[];
+  days?:       AlertDay[];   // The specific days that triggered the alert
 }
 
-// ── DB logging ────────────────────────────────────────────────────────────
+
+// Inserts a record into alert_logs to track that an alert was sent.
+// Errors are silently swallowed so a logging failure never blocks an alert email.
 async function logAlertToDb(args: {
   location_key: string;
   risk_label:   string;
-  date:         string;
+  date:         string;  // YYYY-MM-DD in Nepal Standard Time
   message:      string;
 }): Promise<void> {
   try {
@@ -60,24 +76,30 @@ async function logAlertToDb(args: {
       [args.location_key, args.risk_label, args.date, args.message],
     );
   } catch {
-    // Table may not exist yet — silently skip
+    // Table may not exist on first run — skip silently rather than crashing
   }
 }
 
-// ── ML forecast alert ─────────────────────────────────────────────────────
+
+// Queries the next 7 days of fire risk predictions, filters to days at or
+// above the minRisk threshold, and sends an alert email if any qualify.
+// Called by POST /api/alerts/run-email and autoAlertAfterPrediction().
 export async function runRiskEmailAlerts(args: {
   latitude?:     number;
   longitude?:    number;
   location_key?: string;
   minRisk?:      "High" | "Extreme";
-  extraTo?:      string[];
-  iotNote?:      string;
+  extraTo?:      string[];   // Additional recipient addresses
+  iotNote?:      string;     // Optional note from an IoT device appended to the email
 }): Promise<AlertResult> {
+
+  // Fall back to configured defaults if no overrides are provided
   const latitude     = args.latitude     ?? config.latitude;
   const longitude    = args.longitude    ?? config.longitude;
   const location_key = args.location_key ?? config.locationKey;
   const minRisk      = args.minRisk      ?? "High";
 
+  // Fetch upcoming predictions for this location starting from today
   const { rows } = await pool.query<{
     date:             Date | string;
     risk_label:       string;
@@ -93,6 +115,7 @@ export async function runRiskEmailAlerts(args: {
     [latitude, longitude],
   );
 
+  // Return early with a hint if no predictions exist yet
   if (!rows.length) {
     return {
       ok:      true,
@@ -100,6 +123,7 @@ export async function runRiskEmailAlerts(args: {
     };
   }
 
+  // Filter to only days that meet or exceed the minimum risk threshold
   const highDays: AlertDay[] = rows
     .filter((r) => isAboveThreshold(r.risk_label, minRisk))
     .map((r) => ({
@@ -108,6 +132,7 @@ export async function runRiskEmailAlerts(args: {
       risk_probability: Number(r.risk_probability),
     }));
 
+  // No qualifying days — return without sending an email
   if (!highDays.length) {
     return {
       ok:      true,
@@ -117,20 +142,22 @@ export async function runRiskEmailAlerts(args: {
     };
   }
 
+  // Use the single worst label found to set the email subject headline.
+  // Prefers "Extreme" over "High" if both are present.
   const worstLabel =
     highDays.find((d) => d.risk_label === "Extreme")?.risk_label ??
-    highDays.find((d) => d.risk_label === "High")?.risk_label ??
+    highDays.find((d) => d.risk_label === "High")?.risk_label    ??
     minRisk;
 
-  const subject = ` [${worstLabel} Risk] Wildfire Alert — ${location_key} (${highDays.length} day${highDays.length > 1 ? "s" : ""})`;
+  const subject = `[${worstLabel} Risk] Wildfire Alert — ${location_key} (${highDays.length} day${highDays.length > 1 ? "s" : ""})`;
 
   const emailArgs = {
-    location: location_key,
+    location:  location_key,
     latitude,
     longitude,
     threshold: minRisk,
     highDays,
-    iotNote: args.iotNote,
+    iotNote:   args.iotNote,
   };
 
   const { messageId, recipients } = await sendFireAlert({
@@ -140,40 +167,49 @@ export async function runRiskEmailAlerts(args: {
     extraTo: args.extraTo,
   });
 
-  console.log(` Alert sent | msgId=${messageId} | to=${recipients.join(", ")}`);
+  console.log(`Alert sent | msgId=${messageId} | to=${recipients.join(", ")}`);
 
-  // ── Use Nepal date for logging so deduplication works correctly ────────
+  // Log each high-risk day using the Nepal date so deduplication works correctly
+  // when the server clock is UTC and the local date in Nepal is different
   const todayNepal = getTodayNepal();
   for (const day of highDays) {
     await logAlertToDb({
       location_key,
       risk_label: day.risk_label,
       date:       todayNepal,
-      message:    `${day.risk_label} fire risk detected (confidence: ${(day.risk_probability * 100).toFixed(1)}%)${args.iotNote ? " | " + args.iotNote : ""}`,
+      message:    `${day.risk_label} fire risk detected (confidence: ${(day.risk_probability * 100).toFixed(1)}%)` +
+                  (args.iotNote ? ` | ${args.iotNote}` : ""),
     });
   }
 
   return { ok: true, alerts: highDays.length, sent: true, recipients, days: highDays };
 }
 
-// ── IoT fire/smoke alert ──────────────────────────────────────────────────
+
+// Shape of the arguments passed when an IoT device reports fire or smoke conditions
 export interface IoTAlertArgs {
-  deviceId:     string;
-  deviceName:   string;
-  location:     string;
-  smokePpm:     number;
-  temperature:  number;
-  fireDetected: boolean;
+  deviceId:     string;   // Hardware identifier, e.g. "esp32_node_01"
+  deviceName:   string;   // Human-readable device label
+  location:     string;   // Location label override
+  smokePpm:     number;   // MQ-2 smoke concentration in parts per million
+  temperature:  number;   // DHT22 ambient temperature in Celsius
+  fireDetected: boolean;  // True if the flame sensor triggered
 }
 
+// Sends an immediate alert email when an IoT device detects fire or elevated smoke.
+// Called by POST /api/alerts/iot-fire. Logs the event to alert_logs using Nepal date.
 export async function sendIoTFireAlert(args: IoTAlertArgs): Promise<AlertResult> {
-  const {
-    deviceId, deviceName, location, smokePpm, temperature, fireDetected,
-  } = args;
+  const { deviceId, deviceName, location, smokePpm, temperature, fireDetected } = args;
 
-  const severity = fireDetected ? " FIRE DETECTED" : smokePpm > 300 ? " EXTREME SMOKE" : " HIGH SMOKE";
-  const subject  = `${severity} — IoT Sensor Alert [${location}]`;
+  // Severity label used in the email subject and plain-text body
+  const severity = fireDetected      ? "FIRE DETECTED" :
+                   smokePpm > 300    ? "EXTREME SMOKE"  :
+                                       "HIGH SMOKE";
 
+  const subject = `${severity} — IoT Sensor Alert [${location}]`;
+
+  // Plain-text body with all sensor readings and recommended actions.
+  // Shown by email clients that do not render HTML and used as the inbox preview snippet.
   const body = [
     `${severity}`,
     "",
@@ -181,18 +217,19 @@ export async function sendIoTFireAlert(args: IoTAlertArgs): Promise<AlertResult>
     `Location : ${location}`,
     `Timestamp: ${new Date().toISOString()}`,
     "",
-    "─── Sensor Readings ───────────────────────",
-    `Temperature  : ${temperature.toFixed(1)} °C`,
+    "Sensor Readings",
+    `Temperature  : ${temperature.toFixed(1)} C`,
     `Smoke (PPM)  : ${smokePpm} ppm  ${smokePpm > 300 ? "[DANGER]" : smokePpm > 150 ? "[HIGH]" : "[ELEVATED]"}`,
-    `Fire Sensor  : ${fireDetected ? "TRIGGERED ⚠" : "Not triggered"}`,
+    `Fire Sensor  : ${fireDetected ? "TRIGGERED" : "Not triggered"}`,
     "",
-    "─── Recommended Actions ───────────────────",
+    "Recommended Actions",
+    // Action list varies based on whether fire was confirmed or only smoke detected
     ...(fireDetected
       ? [
           "1. Contact emergency services immediately",
           "2. Evacuate nearby personnel",
           "3. Deploy fire suppression resources",
-          "4. Notify forest department & local authorities",
+          "4. Notify forest department and local authorities",
         ]
       : [
           "1. Investigate smoke source near sensor",
@@ -201,8 +238,7 @@ export async function sendIoTFireAlert(args: IoTAlertArgs): Promise<AlertResult>
           "4. Monitor sensor readings closely",
         ]),
     "",
-    "─────────────────────────────────────────",
-    "वन दृष्टि — Wildfire Risk Monitoring System",
+    "Van Drishti — Wildfire Risk Monitoring System",
     `Lumbini Forest Zone · lat=${config.latitude}, lon=${config.longitude}`,
   ].join("\n");
 
@@ -213,13 +249,13 @@ export async function sendIoTFireAlert(args: IoTAlertArgs): Promise<AlertResult>
     extraTo: [],
   });
 
-  console.log(` IoT Alert sent | device=${deviceId} | msgId=${messageId}`);
+  console.log(`IoT Alert sent | device=${deviceId} | msgId=${messageId}`);
 
   await logAlertToDb({
     location_key: location,
     risk_label:   fireDetected ? "Extreme" : "High",
     date:         getTodayNepal(),
-    message:      `IoT Alert: ${severity} at ${deviceName} (smoke: ${smokePpm} ppm, temp: ${temperature.toFixed(1)}°C)`,
+    message:      `IoT Alert: ${severity} at ${deviceName} (smoke: ${smokePpm} ppm, temp: ${temperature.toFixed(1)}C)`,
   });
 
   return {
@@ -231,19 +267,25 @@ export async function sendIoTFireAlert(args: IoTAlertArgs): Promise<AlertResult>
   };
 }
 
-// ── Build IoT alert HTML ──────────────────────────────────────────────────
+
+// Builds the HTML email body for an IoT fire or smoke alert.
+// Uses inline CSS throughout for compatibility with email clients that
+// strip external stylesheets. Color adjusts based on severity level.
 function buildIoTAlertHtml(args: IoTAlertArgs): string {
   const { deviceId, deviceName, location, smokePpm, temperature, fireDetected } = args;
-  const col = fireDetected ? "#ff4d4d" : smokePpm > 300 ? "#ff4d4d" : "#ff8c42";
+
+  // Header color: red for confirmed fire or extreme smoke, orange for high smoke
+  const col = fireDetected || smokePpm > 300 ? "#ff4d4d" : "#ff8c42";
 
   return `
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>IoT Fire Alert</title></head>
 <body style="background:#0d1f17;font-family:sans-serif;padding:0;margin:0;">
 <div style="max-width:600px;margin:0 auto;padding:32px 20px;">
+
   <div style="background:${col}18;border:1px solid ${col}40;border-radius:16px;padding:24px;margin-bottom:20px;">
     <div style="font-size:28px;font-weight:900;color:${col};margin-bottom:8px;">
-      ${fireDetected ? "🔥 FIRE DETECTED" : "⚠️ SMOKE ALERT"}
+      ${fireDetected ? "FIRE DETECTED" : "SMOKE ALERT"}
     </div>
     <div style="color:rgba(255,255,255,0.65);font-size:14px;">IoT Sensor Emergency Alert</div>
   </div>
@@ -251,9 +293,9 @@ function buildIoTAlertHtml(args: IoTAlertArgs): string {
   <div style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:20px;margin-bottom:16px;">
     <div style="color:rgba(255,255,255,0.4);font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Device Info</div>
     ${[
-      ["Device",      `${deviceName} (${deviceId})`],
-      ["Location",    location],
-      ["Timestamp",   new Date().toLocaleString()],
+      ["Device",    `${deviceName} (${deviceId})`],
+      ["Location",  location],
+      ["Timestamp", new Date().toLocaleString()],
     ].map(([k, v]) => `
       <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
         <span style="color:rgba(255,255,255,0.45);font-size:13px;">${k}</span>
@@ -265,9 +307,9 @@ function buildIoTAlertHtml(args: IoTAlertArgs): string {
   <div style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:20px;margin-bottom:16px;">
     <div style="color:rgba(255,255,255,0.4);font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Sensor Readings</div>
     ${[
-      ["Temperature",   `${temperature.toFixed(1)} °C`,   "#ff8c42"],
-      ["Smoke (PPM)",   `${smokePpm} ppm`,                smokePpm > 300 ? "#ff4d4d" : smokePpm > 150 ? "#ff8c42" : "#F1B24A"],
-      ["Fire Sensor",   fireDetected ? "TRIGGERED ⚠" : "Not triggered", fireDetected ? "#ff4d4d" : "#9DC88D"],
+      ["Temperature", `${temperature.toFixed(1)} C`,  "#ff8c42"],
+      ["Smoke (PPM)", `${smokePpm} ppm`,               smokePpm > 300 ? "#ff4d4d" : smokePpm > 150 ? "#ff8c42" : "#F1B24A"],
+      ["Fire Sensor", fireDetected ? "TRIGGERED" : "Not triggered", fireDetected ? "#ff4d4d" : "#9DC88D"],
     ].map(([k, v, c]) => `
       <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
         <span style="color:rgba(255,255,255,0.45);font-size:13px;">${k}</span>
@@ -277,13 +319,13 @@ function buildIoTAlertHtml(args: IoTAlertArgs): string {
   </div>
 
   <div style="background:${col}12;border:1px solid ${col}35;border-radius:14px;padding:18px;">
-    <div style="color:${col};font-size:14px;font-weight:700;margin-bottom:10px;">⚡ Immediate Action Required</div>
+    <div style="color:${col};font-size:14px;font-weight:700;margin-bottom:10px;">Immediate Action Required</div>
     ${fireDetected
       ? `<div style="color:rgba(255,255,255,0.7);font-size:13px;line-height:1.7;">
           1. Contact emergency services immediately<br>
           2. Evacuate nearby personnel from the area<br>
           3. Deploy fire suppression resources<br>
-          4. Notify forest department & local authorities
+          4. Notify forest department and local authorities
         </div>`
       : `<div style="color:rgba(255,255,255,0.7);font-size:13px;line-height:1.7;">
           1. Investigate smoke source near sensor<br>
@@ -295,33 +337,37 @@ function buildIoTAlertHtml(args: IoTAlertArgs): string {
   </div>
 
   <div style="margin-top:20px;text-align:center;color:rgba(255,255,255,0.25);font-size:12px;">
-    वन दृष्टि — Wildfire Risk Monitoring System · Lumbini Forest Zone
+    Van Drishti — Wildfire Risk Monitoring System · Lumbini Forest Zone
   </div>
+
 </div>
 </body></html>`;
 }
 
-// ── Auto-alert after ML prediction ────────────────────────────────────────
+
+// Checks whether an alert has already been sent today (in Nepal time) and if not,
+// calls runRiskEmailAlerts() for High or Extreme risk days.
+// Called automatically by ml.routes.ts after every successful prediction run.
+// Non-fatal — errors are caught and logged without propagating to the caller.
 export async function autoAlertAfterPrediction(): Promise<AlertResult> {
   try {
-    console.log(" Auto-checking predictions for alert conditions …");
+    console.log("Auto-checking predictions for alert conditions");
 
-    // ── Get today's date in Nepal Standard Time (UTC+5:45) ─────────────────
-    // PostgreSQL CURRENT_DATE is UTC — Nepal is UTC+5:45 so dates can mismatch
-    // We calculate Nepal date in JavaScript and pass it as a parameter
+    // Use Nepal date for the deduplication check so it matches the date stored
+    // by logAlertToDb(), which also uses Nepal time rather than UTC
     const todayNepal = getTodayNepal();
 
-    // ── Check if an alert was already sent today using Nepal date ──────────
+    // Skip sending if any non-test alert was already logged today for this location
     const { rows } = await pool.query(
       `SELECT COUNT(*) AS cnt FROM alert_logs
-       WHERE alert_date = $2::date
+       WHERE alert_date  = $2::date
          AND location_key = $1
          AND message NOT LIKE '[TEST]%'`,
       [config.locationKey, todayNepal],
     ).catch(() => ({ rows: [{ cnt: "0" }] }));
 
     if (Number(rows[0]?.cnt) > 0) {
-      console.log(" Auto-alert skipped — alert already sent today");
+      console.log("Auto-alert skipped — alert already sent today");
       return { ok: true, message: "Alert already sent today — skipping duplicate" };
     }
 
@@ -333,14 +379,16 @@ export async function autoAlertAfterPrediction(): Promise<AlertResult> {
     });
 
     if (result.sent) {
-      console.log(` Auto-alert sent | ${result.alerts} high-risk day(s)`);
+      console.log(`Auto-alert sent | ${result.alerts} high-risk day(s)`);
     } else {
-      console.log(` Auto-alert check done — ${result.message}`);
+      console.log(`Auto-alert check done — ${result.message}`);
     }
 
     return result;
+
   } catch (err: any) {
-    console.error(" Auto-alert failed (non-fatal):", err.message);
+    // Non-fatal — a failed auto-alert must never crash the ML prediction route
+    console.error("Auto-alert failed (non-fatal):", err.message);
     return { ok: false, message: err.message };
   }
 }

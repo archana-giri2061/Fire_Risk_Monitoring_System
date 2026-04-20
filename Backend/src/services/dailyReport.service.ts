@@ -1,63 +1,92 @@
-import { pool } from "../db";
-import { config } from "../config";
+// dailyReport.service.ts
+// Builds and sends the scheduled daily fire risk summary email.
+// Covers all 7 upcoming forecast days regardless of risk level,
+// unlike alertEngine.service.ts which only sends for High or Extreme days.
+// Called by the noon scheduler in app.ts and by POST /api/alerts/daily-report.
+
+import { pool }          from "../db";
+import { config }        from "../config";
 import { sendFireAlert } from "./email.service";
 
-// ── Risk style map ──────────────────────────────────────────────────────────
-const RISK_STYLE: Record<string, { color: string; bg: string; border: string; icon: string; urgency: string }> = {
-  Low:      { color: "#166534", bg: "#dcfce7", border: "#16a34a", icon: "✅", urgency: "No immediate action needed." },
-  Moderate: { color: "#92400e", bg: "#fef3c7", border: "#d97706", icon: "⚠️", urgency: "Monitor conditions closely." },
-  High:     { color: "#9a3412", bg: "#ffedd5", border: "#ea580c", icon: "🔶", urgency: "Take precautionary measures immediately." },
-  Extreme:  { color: "#7f1d1d", bg: "#fee2e2", border: "#dc2626", icon: "🔴", urgency: "EMERGENCY — Activate response teams NOW." },
+
+// Visual style properties for each risk level used in the HTML email.
+// Each level gets its own color scheme, icon, and urgency message so
+// the email appearance scales with the severity of the forecast.
+const RISK_STYLE: Record<string, {
+  color:   string;  // Text color for risk label badges
+  bg:      string;  // Background color for risk label badges
+  border:  string;  // Border and accent color
+  icon:    string;  // Icon shown next to the risk label
+  urgency: string;  // Short action recommendation shown in the forecast table
+}> = {
+  Low:      { color: "#166534", bg: "#dcfce7", border: "#16a34a", icon: "[OK]",    urgency: "No immediate action needed."              },
+  Moderate: { color: "#92400e", bg: "#fef3c7", border: "#d97706", icon: "[WARN]",  urgency: "Monitor conditions closely."               },
+  High:     { color: "#9a3412", bg: "#ffedd5", border: "#ea580c", icon: "[HIGH]",  urgency: "Take precautionary measures immediately."  },
+  Extreme:  { color: "#7f1d1d", bg: "#fee2e2", border: "#dc2626", icon: "[ALERT]", urgency: "EMERGENCY — Activate response teams NOW."  },
 };
 
+
+// Shape of a single prediction row used by the report builder functions.
+// Sourced from fire_risk_predictions via sendDailyRiskReport().
 interface PredictionRow {
-  date: string;
-  risk_label: string;
-  risk_probability: number;
+  date:             string;  // YYYY-MM-DD
+  risk_label:       string;  // e.g. "High"
+  risk_probability: number;  // Classifier confidence score 0.0 to 1.0
 }
 
-// ── Build the full daily report HTML email ──────────────────────────────────
+
+// Builds the full HTML email body for the daily report.
+// Uses inline CSS throughout for compatibility with email clients that
+// strip external stylesheets. Table-based layout ensures correct rendering
+// in Outlook and other clients that do not support modern CSS.
+//
+// Parameters:
+//   predictions : Up to 7 upcoming prediction rows ordered by date
+//   location    : Human-readable location label used in the email header
 function buildDailyReportHtml(predictions: PredictionRow[], location: string): string {
+
   const today = new Date().toLocaleDateString("en-US", {
     weekday: "long", year: "numeric", month: "long", day: "numeric",
   });
 
+  // Identify the single worst day to set the overall header color and banner.
+  // Priority order: Extreme > High > Moderate > first available day.
   const overallWorst =
-    predictions.find((p) => p.risk_label === "Extreme") ??
-    predictions.find((p) => p.risk_label === "High") ??
+    predictions.find((p) => p.risk_label === "Extreme")  ??
+    predictions.find((p) => p.risk_label === "High")     ??
     predictions.find((p) => p.risk_label === "Moderate") ??
     predictions[0];
 
   const topStyle = RISK_STYLE[overallWorst?.risk_label ?? "Low"] ?? RISK_STYLE["Low"];
   const isUrgent = ["High", "Extreme"].includes(overallWorst?.risk_label ?? "");
 
-  const rows = predictions
-    .map((p) => {
-      const s = RISK_STYLE[p.risk_label] ?? RISK_STYLE["Low"];
-      const prob = (p.risk_probability * 100).toFixed(1);
-      return `
-        <tr>
-          <td style="padding:12px 16px;border-bottom:1px solid #e5e7eb;font-weight:600;color:#111827;">${p.date}</td>
-          <td style="padding:12px 16px;border-bottom:1px solid #e5e7eb;">
-            <span style="display:inline-block;padding:4px 12px;border-radius:9999px;background:${s.bg};color:${s.color};border:1px solid ${s.border};font-weight:700;font-size:13px;">
-              ${s.icon} ${p.risk_label}
-            </span>
-          </td>
-          <td style="padding:12px 16px;border-bottom:1px solid #e5e7eb;text-align:center;">
-            <div style="display:inline-block;width:52px;height:52px;border-radius:50%;background:${s.bg};border:3px solid ${s.border};line-height:46px;text-align:center;font-weight:800;color:${s.color};font-size:13px;">
-              ${prob}%
-            </div>
-          </td>
-          <td style="padding:12px 16px;border-bottom:1px solid #e5e7eb;font-size:13px;color:#6b7280;">${s.urgency}</td>
-        </tr>`;
-    })
-    .join("");
+  // Build one HTML table row per prediction day
+  const rows = predictions.map((p) => {
+    const s    = RISK_STYLE[p.risk_label] ?? RISK_STYLE["Low"];
+    const prob = (p.risk_probability * 100).toFixed(1);
+    return `
+      <tr>
+        <td style="padding:12px 16px;border-bottom:1px solid #e5e7eb;font-weight:600;color:#111827;">${p.date}</td>
+        <td style="padding:12px 16px;border-bottom:1px solid #e5e7eb;">
+          <span style="display:inline-block;padding:4px 12px;border-radius:9999px;background:${s.bg};color:${s.color};border:1px solid ${s.border};font-weight:700;font-size:13px;">
+            ${s.icon} ${p.risk_label}
+          </span>
+        </td>
+        <td style="padding:12px 16px;border-bottom:1px solid #e5e7eb;text-align:center;">
+          <div style="display:inline-block;width:52px;height:52px;border-radius:50%;background:${s.bg};border:3px solid ${s.border};line-height:46px;text-align:center;font-weight:800;color:${s.color};font-size:13px;">
+            ${prob}%
+          </div>
+        </td>
+        <td style="padding:12px 16px;border-bottom:1px solid #e5e7eb;font-size:13px;color:#6b7280;">${s.urgency}</td>
+      </tr>`;
+  }).join("");
 
+  // The urgent banner appears below the header only for High or Extreme overall risk
   const urgentBanner = isUrgent
     ? `<tr>
         <td style="background:${topStyle.border};padding:18px 40px;text-align:center;">
           <p style="margin:0;color:#fff;font-size:15px;font-weight:700;letter-spacing:0.5px;">
-            ⚡ ${topStyle.urgency}
+            ${topStyle.urgency}
           </p>
         </td>
       </tr>`
@@ -72,25 +101,24 @@ function buildDailyReportHtml(predictions: PredictionRow[], location: string): s
     <table width="640" cellpadding="0" cellspacing="0"
            style="max-width:640px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
 
-      <!-- HEADER -->
+      <!-- Header banner — background color reflects the overall worst risk level -->
       <tr>
         <td style="background:${topStyle.border};padding:32px 40px;text-align:center;">
-          <div style="font-size:48px;margin-bottom:8px;">🔥</div>
           <h1 style="margin:0;color:#ffffff;font-size:26px;font-weight:800;">Daily Fire Risk Report</h1>
           <p style="margin:8px 0 0;color:rgba(255,255,255,0.88);font-size:15px;">${today}</p>
         </td>
       </tr>
 
-      <!-- URGENT BANNER (only for High/Extreme) -->
+      <!-- Urgent action banner — only rendered for High or Extreme overall risk -->
       ${urgentBanner}
 
-      <!-- LOCATION -->
+      <!-- Location row — shows the monitored location and overall risk badge -->
       <tr>
         <td style="background:${topStyle.bg};padding:16px 40px;border-bottom:2px solid ${topStyle.border};">
           <table width="100%" cellpadding="0" cellspacing="0">
             <tr>
               <td>
-                <span style="font-size:13px;color:${topStyle.color};font-weight:600;text-transform:uppercase;">📍 Monitored Location</span><br/>
+                <span style="font-size:13px;color:${topStyle.color};font-weight:600;text-transform:uppercase;">Monitored Location</span><br/>
                 <span style="font-size:18px;font-weight:800;color:${topStyle.color};">${location}</span>
               </td>
               <td align="right">
@@ -103,10 +131,10 @@ function buildDailyReportHtml(predictions: PredictionRow[], location: string): s
         </td>
       </tr>
 
-      <!-- BODY -->
+      <!-- Body — forecast table and action recommendations -->
       <tr>
         <td style="padding:32px 40px;">
-          <h2 style="margin:0 0 16px;font-size:17px;color:#111827;font-weight:700;">📅 7-Day Fire Risk Forecast</h2>
+          <h2 style="margin:0 0 16px;font-size:17px;color:#111827;font-weight:700;">7-Day Fire Risk Forecast</h2>
           <table width="100%" cellpadding="0" cellspacing="0"
                  style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;border-collapse:collapse;margin-bottom:28px;">
             <thead>
@@ -121,8 +149,9 @@ function buildDailyReportHtml(predictions: PredictionRow[], location: string): s
           </table>
 
           ${isUrgent ? `
+          <!-- Emergency actions block — only shown for High or Extreme overall risk -->
           <div style="background:#fff1f2;border:2px solid #dc2626;border-radius:10px;padding:20px 24px;margin-bottom:24px;">
-            <h3 style="margin:0 0 12px;font-size:15px;color:#7f1d1d;font-weight:800;">🚨 Immediate Actions Required</h3>
+            <h3 style="margin:0 0 12px;font-size:15px;color:#7f1d1d;font-weight:800;">Immediate Actions Required</h3>
             <ul style="margin:0;padding-left:20px;">
               <li style="padding:5px 0;color:#374151;font-size:14px;">Activate emergency forest fire response teams</li>
               <li style="padding:5px 0;color:#374151;font-size:14px;">Ban all open burning and fire activities immediately</li>
@@ -131,8 +160,9 @@ function buildDailyReportHtml(predictions: PredictionRow[], location: string): s
               <li style="padding:5px 0;color:#374151;font-size:14px;">Coordinate with local authorities and disaster management</li>
             </ul>
           </div>` : `
+          <!-- Standard precautions block — shown when overall risk is Low or Moderate -->
           <div style="background:#f0fdf4;border:1px solid #16a34a;border-radius:10px;padding:20px 24px;margin-bottom:24px;">
-            <h3 style="margin:0 0 12px;font-size:15px;color:#166534;font-weight:700;">✅ Standard Precautions</h3>
+            <h3 style="margin:0 0 12px;font-size:15px;color:#166534;font-weight:700;">Standard Precautions</h3>
             <ul style="margin:0;padding-left:20px;">
               <li style="padding:5px 0;color:#374151;font-size:14px;">Continue regular forest patrol schedule</li>
               <li style="padding:5px 0;color:#374151;font-size:14px;">Monitor weather conditions and ML predictions daily</li>
@@ -141,9 +171,10 @@ function buildDailyReportHtml(predictions: PredictionRow[], location: string): s
             </ul>
           </div>`}
 
+          <!-- Report metadata footer note -->
           <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:16px;">
             <p style="margin:0;font-size:13px;color:#1e40af;line-height:1.6;">
-              <strong>ℹ️ About this report:</strong> Automatically generated every day at 7:00 AM by the
+              <strong>About this report:</strong> Automatically generated every day at 7:00 AM by the
               Wildfire Risk Monitoring System. Predictions use a Logistic Regression ML model trained on
               Open-Meteo weather data. This is an automated report — do not reply.
             </p>
@@ -151,11 +182,11 @@ function buildDailyReportHtml(predictions: PredictionRow[], location: string): s
         </td>
       </tr>
 
-      <!-- FOOTER -->
+      <!-- Email footer -->
       <tr>
         <td style="background:#f9fafb;padding:20px 40px;border-top:1px solid #e5e7eb;text-align:center;">
           <p style="margin:0;font-size:12px;color:#9ca3af;">
-            🌲 वन दृष्टि — Wildfire Risk Monitoring System | Lumbini Forest Zone<br/>
+            Van Drishti — Wildfire Risk Monitoring System | Lumbini Forest Zone<br/>
             Lat: ${config.latitude} | Lon: ${config.longitude}
           </p>
         </td>
@@ -168,19 +199,27 @@ function buildDailyReportHtml(predictions: PredictionRow[], location: string): s
 </html>`;
 }
 
-// ── Build plain-text version ────────────────────────────────────────────────
+
+// Builds the plain-text fallback version of the daily report email.
+// Shown by email clients that do not render HTML, and used as the
+// inbox preview snippet before the full email is opened.
+//
+// Parameters:
+//   predictions : Up to 7 upcoming prediction rows ordered by date
+//   location    : Human-readable location label
 function buildDailyReportText(predictions: PredictionRow[], location: string): string {
   const today = new Date().toDateString();
+
+  // One line per day with date, risk label, and confidence percentage
   const lines = predictions.map(
-    (p) =>
-      `  • ${p.date}  |  ${p.risk_label.padEnd(8)}  |  Confidence: ${(p.risk_probability * 100).toFixed(1)}%`,
+    (p) => `  ${p.date}  |  ${p.risk_label.padEnd(8)}  |  Confidence: ${(p.risk_probability * 100).toFixed(1)}%`,
   );
 
   const isUrgent = predictions.some((p) => ["High", "Extreme"].includes(p.risk_label));
 
   return [
-    `🔥 DAILY FIRE RISK REPORT — ${today}`,
-    `═══════════════════════════════════════════════`,
+    `DAILY FIRE RISK REPORT — ${today}`,
+    `===========================================`,
     ``,
     `Location : ${location}`,
     `Coords   : lat=${config.latitude}, lon=${config.longitude}`,
@@ -188,38 +227,42 @@ function buildDailyReportText(predictions: PredictionRow[], location: string): s
     `7-DAY FORECAST SUMMARY:`,
     ...lines,
     ``,
+    // Action section varies based on whether any High or Extreme day exists
     isUrgent
       ? [
-          `⚠️  HIGH/EXTREME RISK DETECTED — IMMEDIATE ACTION REQUIRED:`,
-          `  • Activate emergency response teams`,
-          `  • Ban all open burning immediately`,
-          `  • Issue public warnings near forest zones`,
-          `  • Pre-position firefighting resources`,
+          `HIGH/EXTREME RISK DETECTED — IMMEDIATE ACTION REQUIRED:`,
+          `  - Activate emergency response teams`,
+          `  - Ban all open burning immediately`,
+          `  - Issue public warnings near forest zones`,
+          `  - Pre-position firefighting resources`,
         ].join("\n")
       : [
-          `✅ STANDARD PRECAUTIONS:`,
-          `  • Continue regular patrol schedule`,
-          `  • Monitor conditions daily`,
-          `  • Keep equipment in ready state`,
+          `STANDARD PRECAUTIONS:`,
+          `  - Continue regular patrol schedule`,
+          `  - Monitor conditions daily`,
+          `  - Keep equipment in ready state`,
         ].join("\n"),
     ``,
-    `═══════════════════════════════════════════════`,
-    `वन दृष्टि — Wildfire Risk Monitoring System`,
+    `===========================================`,
+    `Van Drishti — Wildfire Risk Monitoring System`,
     `Automated daily report. Do not reply.`,
   ].join("\n");
 }
 
-// ── Main: send daily report for ALL risk levels ─────────────────────────────
+
+// Queries the next 7 days of predictions, builds the daily report email,
+// sends it, and logs the send to alert_logs for deduplication.
+// Returns a plain result object so the caller can include it in the API response.
 export async function sendDailyRiskReport(): Promise<{
-  ok: boolean;
-  message?: string;
-  sent?: boolean;
+  ok:        boolean;
+  message?:  string;
+  sent?:     boolean;
   riskLevel?: string;
 }> {
   try {
     const { rows } = await pool.query<{
-      date: Date | string;
-      risk_label: string;
+      date:             Date | string;
+      risk_label:       string;
       risk_probability: string;
     }>(
       `SELECT date, risk_label, COALESCE(risk_probability, 0) AS risk_probability
@@ -232,25 +275,32 @@ export async function sendDailyRiskReport(): Promise<{
       [config.latitude, config.longitude],
     );
 
+    // Return early with a hint if no predictions exist yet
     if (!rows.length) {
-      console.log(" [Daily Report] No predictions available — skipping email.");
-      return { ok: true, message: "No predictions found. Run /api/ml/predict-forecast first.", sent: false };
+      console.log("[Daily Report] No predictions available — skipping email.");
+      return {
+        ok:      true,
+        message: "No predictions found. Run /api/ml/predict-forecast first.",
+        sent:    false,
+      };
     }
 
+    // Normalise DB rows to plain PredictionRow objects
     const predictions: PredictionRow[] = rows.map((r) => ({
-      date: String(r.date).slice(0, 10),
-      risk_label: r.risk_label,
+      date:             String(r.date).slice(0, 10),
+      risk_label:       r.risk_label,
       risk_probability: Number(r.risk_probability),
     }));
 
-    // Find the overall worst risk to set subject
+    // Identify the worst risk level across all 7 days for the email subject line.
+    // Priority order: Extreme > High > Moderate > Low.
     const worstRisk =
-      predictions.find((p) => p.risk_label === "Extreme")?.risk_label ??
-      predictions.find((p) => p.risk_label === "High")?.risk_label ??
+      predictions.find((p) => p.risk_label === "Extreme")?.risk_label  ??
+      predictions.find((p) => p.risk_label === "High")?.risk_label     ??
       predictions.find((p) => p.risk_label === "Moderate")?.risk_label ??
       "Low";
 
-    const icon = RISK_STYLE[worstRisk]?.icon ?? "📋";
+    const icon    = RISK_STYLE[worstRisk]?.icon ?? "[REPORT]";
     const subject = `${icon} [Daily Report] Fire Risk Forecast — ${config.locationKey} | Overall: ${worstRisk}`;
 
     await sendFireAlert({
@@ -259,18 +309,24 @@ export async function sendDailyRiskReport(): Promise<{
       text: buildDailyReportText(predictions, config.locationKey),
     });
 
-    // Log to DB so duplicate check works
+    // Log the send to alert_logs so autoAlertAfterPrediction() can detect it
+    // and skip sending a duplicate alert on the same day.
+    // .catch(() => {}) prevents a missing table from failing the response.
     await pool.query(
       `INSERT INTO alert_logs (location_key, risk_label, alert_date, message, created_at)
        VALUES ($1, $2, CURRENT_DATE, $3, NOW())`,
-      [config.locationKey, worstRisk,
-       `Daily Report sent — Overall: ${worstRisk} risk (${predictions.length} day forecast)`],
+      [
+        config.locationKey,
+        worstRisk,
+        `Daily Report sent — Overall: ${worstRisk} risk (${predictions.length} day forecast)`,
+      ],
     ).catch(() => {});
 
-    console.log(` [Daily Report] Sent successfully | Overall risk: ${worstRisk}`);
+    console.log(`[Daily Report] Sent successfully | Overall risk: ${worstRisk}`);
     return { ok: true, sent: true, riskLevel: worstRisk };
+
   } catch (err: any) {
-    console.error(" [Daily Report] Failed:", err.message);
+    console.error("[Daily Report] Failed:", err.message);
     return { ok: false, message: err.message };
   }
 }

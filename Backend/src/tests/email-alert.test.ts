@@ -1,27 +1,10 @@
-/**
- * ════════════════════════════════════════════════════════════
- *  Email Alert System — Full Test Suite
- *  Run with:  npx ts-node tests/email-alert.test.ts
- *  Or via:    npm run test:email
- * ════════════════════════════════════════════════════════════
- *
- * Tests covered:
- *   1.  SMTP config check
- *   2.  Plain test email (smoke test)
- *   3.  Extreme risk email alert
- *   4.  High risk email alert
- *   5.  Moderate risk daily report
- *   6.  Low risk daily report
- *   7.  Daily report (all predictions from DB)
- *   8.  No predictions — graceful skip
- *   9.  Extreme-only filter (minRisk = "Extreme")
- *   10. IoT fire alert
- *   11. IoT smoke-only alert (no fire)
- *   12. API route: POST /api/alerts/test-email
- *   13. API route: POST /api/alerts/test-extreme
- *   14. API route: POST /api/alerts/test-daily-report
- *   15. API route: POST /api/alerts/daily-report
- */
+// email-alert.test.ts
+// End-to-end test suite for the wildfire alert email system.
+// Covers unit tests (no network or DB), integration tests (SMTP + DB),
+// and API endpoint tests (requires the server running on localhost).
+//
+// Run with:  npx ts-node tests/email-alert.test.ts
+// Or via:    npm run test:email
 
 import "dotenv/config";
 import nodemailer from "nodemailer";
@@ -32,13 +15,12 @@ import {
   sendFireAlert,
   sendEmailAlert,
 } from "../services/email.service";
-import { sendDailyRiskReport } from "../services/dailyReport.service";
-import {
-  runRiskEmailAlerts,
-  sendIoTFireAlert,
-} from "../services/alertEngine.service";
+import { sendDailyRiskReport }                from "../services/dailyReport.service";
+import { runRiskEmailAlerts, sendIoTFireAlert } from "../services/alertEngine.service";
 
-// ── Colour helpers ─────────────────────────────────────────────────────────
+
+// ANSI color codes for terminal output formatting.
+// Used by the pass(), fail(), skip(), and section() helpers below.
 const GREEN  = "\x1b[32m";
 const RED    = "\x1b[31m";
 const YELLOW = "\x1b[33m";
@@ -46,41 +28,57 @@ const CYAN   = "\x1b[36m";
 const BOLD   = "\x1b[1m";
 const RESET  = "\x1b[0m";
 
-let passed = 0;
-let failed = 0;
+// Global counters incremented by pass(), fail(), and skip() for the final summary
+let passed  = 0;
+let failed  = 0;
 let skipped = 0;
 
+// Prints a plain log line to stdout
 function log(msg: string) { console.log(msg); }
+
+// Records a passed test and prints a green checkmark with an optional detail string
 function pass(name: string, detail = "") {
   passed++;
-  log(`  ${GREEN}✓${RESET} ${name}${detail ? ` — ${CYAN}${detail}${RESET}` : ""}`);
+  log(`  ${GREEN}pass${RESET} ${name}${detail ? ` — ${CYAN}${detail}${RESET}` : ""}`);
 }
+
+// Records a failed test and prints the error message in red
 function fail(name: string, err: any) {
   failed++;
-  log(`  ${RED}✗ FAIL${RESET} ${name}`);
+  log(`  ${RED}FAIL${RESET} ${name}`);
   log(`    ${RED}${err?.message ?? err}${RESET}`);
 }
+
+// Records a skipped test and prints the reason in yellow
+// Used when a test cannot run due to missing data or an unreachable server
 function skip(name: string, reason: string) {
   skipped++;
-  log(`  ${YELLOW}⊘ SKIP${RESET} ${name} — ${reason}`);
+  log(`  ${YELLOW}SKIP${RESET} ${name} — ${reason}`);
 }
+
+// Prints a bold section header to visually separate test groups in the output
 function section(title: string) {
-  log(`\n${BOLD}${CYAN}── ${title} ${"─".repeat(Math.max(0, 50 - title.length))}${RESET}`);
+  log(`\n${BOLD}${CYAN}-- ${title} ${"-".repeat(Math.max(0, 50 - title.length))}${RESET}`);
 }
 
-// ══════════════════════════════════════════════════════════════════════════
-//  UNIT TESTS  (no network / DB needed)
-// ══════════════════════════════════════════════════════════════════════════
 
+// UNIT TESTS
+// These tests do not require a network connection or database access.
+// They verify configuration values and the HTML/text email builder functions.
+
+
+// Verifies that all four required SMTP environment variables are present.
+// Fails immediately with a list of missing variables rather than letting
+// a later integration test crash with a less helpful error.
 async function testSmtpConfig() {
-  section("1 · SMTP Config Check");
+  section("1 - SMTP Config Check");
 
-  const { host, user, pass : smtpPass, to } = config.smtp;
+  const { host, user, pass: smtpPass, to } = config.smtp;
   const missing: string[] = [];
-  if (!host) missing.push("SMTP_HOST");
-  if (!user) missing.push("SMTP_USER");
+  if (!host)     missing.push("SMTP_HOST");
+  if (!user)     missing.push("SMTP_USER");
   if (!smtpPass) missing.push("SMTP_PASS");
-  if (!to)   missing.push("ALERT_TO_EMAIL");
+  if (!to)       missing.push("ALERT_TO_EMAIL");
 
   if (missing.length) {
     fail("SMTP env vars", `Missing: ${missing.join(", ")}`);
@@ -89,8 +87,10 @@ async function testSmtpConfig() {
   }
 }
 
+// Verifies that buildFireAlertHtml() produces valid HTML for an Extreme risk alert.
+// Checks for required content strings and a minimum length to catch template regressions.
 async function testBuildExtremeEmail() {
-  section("2 · buildFireAlertHtml — Extreme Risk");
+  section("2 - buildFireAlertHtml Extreme Risk");
   try {
     const html = buildFireAlertHtml({
       location:  "Lumbini Forest",
@@ -103,10 +103,10 @@ async function testBuildExtremeEmail() {
       ],
     });
 
-    if (!html.includes("Extreme"))  throw new Error("Missing 'Extreme' in HTML");
-    if (!html.includes("🔴"))       throw new Error("Missing Extreme icon 🔴");
-    if (!html.includes("95.0%"))    throw new Error("Missing probability 95.0%");
-    if (!html.includes("88.0%"))    throw new Error("Missing probability 88.0%");
+    if (!html.includes("Extreme")) throw new Error("Missing 'Extreme' in HTML");
+    if (!html.includes("[ALERT]")) throw new Error("Missing Extreme icon [ALERT]");
+    if (!html.includes("95.0%"))   throw new Error("Missing probability 95.0%");
+    if (!html.includes("88.0%"))   throw new Error("Missing probability 88.0%");
     if (html.length < 500)         throw new Error("HTML too short — looks malformed");
 
     pass("HTML contains Extreme risk content");
@@ -117,8 +117,9 @@ async function testBuildExtremeEmail() {
   }
 }
 
+// Verifies that buildFireAlertHtml() produces correct output for a High risk alert.
 async function testBuildHighEmail() {
-  section("3 · buildFireAlertHtml — High Risk");
+  section("3 - buildFireAlertHtml High Risk");
   try {
     const html = buildFireAlertHtml({
       location:  "Lumbini Forest",
@@ -131,7 +132,7 @@ async function testBuildHighEmail() {
     });
 
     if (!html.includes("High"))    throw new Error("Missing 'High' in HTML");
-    if (!html.includes("🔶"))      throw new Error("Missing High icon 🔶");
+    if (!html.includes("[HIGH]"))  throw new Error("Missing High icon [HIGH]");
     if (!html.includes("75.0%"))   throw new Error("Missing probability 75.0%");
 
     pass("HTML contains High risk content");
@@ -140,8 +141,10 @@ async function testBuildHighEmail() {
   }
 }
 
+// Verifies that buildFireAlertText() produces a correctly structured plain-text body.
+// Plain-text is shown by email clients that do not render HTML and as the inbox preview.
 async function testBuildPlainText() {
-  section("4 · buildFireAlertText — plain text");
+  section("4 - buildFireAlertText plain text");
   try {
     const text = buildFireAlertText({
       location:  "Test Forest",
@@ -163,18 +166,23 @@ async function testBuildPlainText() {
   }
 }
 
-// ══════════════════════════════════════════════════════════════════════════
-//  INTEGRATION TESTS  (requires working SMTP + DB)
-// ══════════════════════════════════════════════════════════════════════════
 
+// INTEGRATION TESTS
+// These tests require a working SMTP connection and a running PostgreSQL database.
+// They send real emails and query real prediction data.
+
+
+// Verifies the SMTP connection can be established using the configured credentials.
+// Uses nodemailer's verify() which opens a connection and checks authentication
+// without sending a message.
 async function testSmtpConnection() {
-  section("5 · SMTP Connection Verify");
+  section("5 - SMTP Connection Verify");
   try {
     const transporter = nodemailer.createTransport({
       host:   config.smtp.host,
       port:   config.smtp.port,
       secure: config.smtp.secure,
-      auth: { user: config.smtp.user, pass: config.smtp.pass },
+      auth:   { user: config.smtp.user, pass: config.smtp.pass },
     });
     await transporter.verify();
     pass("SMTP connection verified", `${config.smtp.host}:${config.smtp.port}`);
@@ -183,11 +191,12 @@ async function testSmtpConnection() {
   }
 }
 
+// Sends a plain-text smoke test email to confirm the full send path works end to end.
 async function testSendPlainEmail() {
-  section("6 · sendEmailAlert — plain smoke test");
+  section("6 - sendEmailAlert plain smoke test");
   try {
     await sendEmailAlert(
-      "🧪 [Test] Wildfire Alert System — Smoke Test",
+      "[Test] Wildfire Alert System — Smoke Test",
       [
         "This is a plain-text smoke test from the email alert test suite.",
         "",
@@ -205,8 +214,10 @@ async function testSendPlainEmail() {
   }
 }
 
+// Sends a full HTML + plain-text Extreme risk alert using mock prediction data.
+// Verifies that sendFireAlert() returns a messageId confirming the email was accepted.
 async function testSendExtremeAlert() {
-  section("7 · sendFireAlert — EXTREME risk (HTML + text)");
+  section("7 - sendFireAlert EXTREME risk HTML and text");
   try {
     const mockDays = [
       { date: "2026-04-03", risk_label: "Extreme", risk_probability: 0.96 },
@@ -223,7 +234,7 @@ async function testSendExtremeAlert() {
     };
 
     const result = await sendFireAlert({
-      subject: `🔴 [TEST] EXTREME Fire Risk — ${config.locationKey}`,
+      subject: `[TEST] EXTREME Fire Risk — ${config.locationKey}`,
       html:    buildFireAlertHtml(emailArgs),
       text:    buildFireAlertText(emailArgs),
     });
@@ -236,8 +247,9 @@ async function testSendExtremeAlert() {
   }
 }
 
+// Sends a High risk alert using mock prediction data.
 async function testSendHighAlert() {
-  section("8 · sendFireAlert — HIGH risk");
+  section("8 - sendFireAlert HIGH risk");
   try {
     const mockDays = [
       { date: "2026-04-06", risk_label: "High", risk_probability: 0.78 },
@@ -252,7 +264,7 @@ async function testSendHighAlert() {
     };
 
     const result = await sendFireAlert({
-      subject: `🔶 [TEST] HIGH Fire Risk — ${config.locationKey}`,
+      subject: `[TEST] HIGH Fire Risk — ${config.locationKey}`,
       html:    buildFireAlertHtml(emailArgs),
       text:    buildFireAlertText(emailArgs),
     });
@@ -264,8 +276,10 @@ async function testSendHighAlert() {
   }
 }
 
+// Tests the IoT fire alert path with a confirmed fire detection scenario.
+// Simulates an ESP32 device reporting a triggered flame sensor with elevated smoke.
 async function testIoTFireAlert() {
-  section("9 · sendIoTFireAlert — fire detected");
+  section("9 - sendIoTFireAlert fire detected");
   try {
     const result = await sendIoTFireAlert({
       deviceId:     "IOT-TEST-001",
@@ -284,8 +298,10 @@ async function testIoTFireAlert() {
   }
 }
 
+// Tests the IoT alert path for elevated smoke without a confirmed fire.
+// Verifies the smoke-only code path produces a different subject and body.
 async function testIoTSmokeOnlyAlert() {
-  section("10 · sendIoTFireAlert — smoke only (no fire)");
+  section("10 - sendIoTFireAlert smoke only no fire");
   try {
     const result = await sendIoTFireAlert({
       deviceId:     "IOT-TEST-002",
@@ -304,8 +320,10 @@ async function testIoTSmokeOnlyAlert() {
   }
 }
 
+// Sends the daily report using real predictions from the database.
+// Skips gracefully if no predictions exist yet rather than failing.
 async function testDailyReportFromDB() {
-  section("11 · sendDailyRiskReport — real predictions from DB");
+  section("11 - sendDailyRiskReport real predictions from DB");
   try {
     const result = await sendDailyRiskReport();
 
@@ -321,8 +339,11 @@ async function testDailyReportFromDB() {
   }
 }
 
+// Tests the Extreme-only alert filter against real DB predictions.
+// Skips if no Extreme-risk days are currently in the forecast — this is expected
+// and should not be treated as a test failure.
 async function testRunRiskEmailAlerts_Extreme() {
-  section("12 · runRiskEmailAlerts — minRisk=Extreme (from DB)");
+  section("12 - runRiskEmailAlerts minRisk=Extreme from DB");
   try {
     const result = await runRiskEmailAlerts({
       latitude:     config.latitude,
@@ -343,8 +364,9 @@ async function testRunRiskEmailAlerts_Extreme() {
   }
 }
 
+// Tests the High-and-above alert filter against real DB predictions.
 async function testRunRiskEmailAlerts_High() {
-  section("13 · runRiskEmailAlerts — minRisk=High (from DB)");
+  section("13 - runRiskEmailAlerts minRisk=High from DB");
   try {
     const result = await runRiskEmailAlerts({
       latitude:     config.latitude,
@@ -365,12 +387,16 @@ async function testRunRiskEmailAlerts_High() {
   }
 }
 
-// ══════════════════════════════════════════════════════════════════════════
-//  API ENDPOINT TESTS  (requires server running on localhost:3000)
-// ══════════════════════════════════════════════════════════════════════════
 
+// API ENDPOINT TESTS
+// These tests require the Express server to be running.
+// They call the real HTTP endpoints to verify the full request-response cycle.
+
+// Base URL for all API calls — defaults to localhost:5000 but can be overridden
+// via the API_BASE_URL environment variable for testing against a remote server
 const BASE = process.env.API_BASE_URL || "http://localhost:5000";
 
+// Sends a POST request to the API and returns the parsed JSON response
 async function apiPost(path: string, body: object = {}): Promise<any> {
   const res = await fetch(`${BASE}${path}`, {
     method:  "POST",
@@ -380,13 +406,17 @@ async function apiPost(path: string, body: object = {}): Promise<any> {
   return res.json();
 }
 
+// Sends a GET request to the API and returns the parsed JSON response
 async function apiGet(path: string): Promise<any> {
   const res = await fetch(`${BASE}${path}`);
   return res.json();
 }
 
+// Checks the /check health endpoint to verify the server is reachable.
+// Returns false if the server is unreachable so all subsequent API tests
+// are skipped rather than failing with unhelpful network errors.
 async function testApiHealth() {
-  section("14 · API Health Check");
+  section("14 - API Health Check");
   try {
     const data = await apiGet("/check");
     if (!data.ok) throw new Error("Server not ok");
@@ -398,8 +428,9 @@ async function testApiHealth() {
   return true;
 }
 
+// Tests the test-email endpoint which sends a diagnostic email via the API route
 async function testApiTestEmail() {
-  section("15 · POST /api/alerts/test-email");
+  section("15 - POST /api/alerts/test-email");
   try {
     const data = await apiPost("/api/alerts/test-email");
     if (!data.ok) throw new Error(data.error ?? JSON.stringify(data));
@@ -409,8 +440,9 @@ async function testApiTestEmail() {
   }
 }
 
+// Tests the test-extreme endpoint which sends a mock Extreme alert via the API route
 async function testApiTestExtreme() {
-  section("16 · POST /api/alerts/test-extreme");
+  section("16 - POST /api/alerts/test-extreme");
   try {
     const data = await apiPost("/api/alerts/test-extreme");
     if (!data.ok) throw new Error(data.error ?? JSON.stringify(data));
@@ -420,8 +452,10 @@ async function testApiTestExtreme() {
   }
 }
 
+// Tests the test-daily-report endpoint using real DB predictions via the API route.
+// Skips if no predictions exist in the database.
 async function testApiTestDailyReport() {
-  section("17 · POST /api/alerts/test-daily-report");
+  section("17 - POST /api/alerts/test-daily-report");
   try {
     const data = await apiPost("/api/alerts/test-daily-report");
     if (!data.ok) throw new Error(data.error ?? JSON.stringify(data));
@@ -436,8 +470,9 @@ async function testApiTestDailyReport() {
   }
 }
 
+// Tests the run-extreme endpoint which filters predictions to Extreme risk only
 async function testApiRunExtreme() {
-  section("18 · POST /api/alerts/run-extreme");
+  section("18 - POST /api/alerts/run-extreme");
   try {
     const data = await apiPost("/api/alerts/run-extreme");
     if (!data.ok) throw new Error(data.error ?? JSON.stringify(data));
@@ -452,8 +487,9 @@ async function testApiRunExtreme() {
   }
 }
 
+// Tests the alert status endpoint which returns the current 7-day risk forecast summary
 async function testApiAlertStatus() {
-  section("19 · GET /api/alerts/status");
+  section("19 - GET /api/alerts/status");
   try {
     const data = await apiGet("/api/alerts/status");
     if (!data.ok) throw new Error(data.error ?? JSON.stringify(data));
@@ -463,24 +499,23 @@ async function testApiAlertStatus() {
   }
 }
 
-// ══════════════════════════════════════════════════════════════════════════
-//  MAIN
-// ══════════════════════════════════════════════════════════════════════════
 
+// Main test runner — executes all test functions in order and prints a final summary.
+// Exits with code 1 if any tests failed so CI pipelines can detect failures.
 async function main() {
-  log(`\n${BOLD}${"═".repeat(60)}${RESET}`);
-  log(`${BOLD}  🔥 Wildfire Alert System — Email Test Suite${RESET}`);
-  log(`${BOLD}${"═".repeat(60)}${RESET}`);
+  log(`\n${BOLD}${"=".repeat(60)}${RESET}`);
+  log(`${BOLD}  Wildfire Alert System — Email Test Suite${RESET}`);
+  log(`${BOLD}${"=".repeat(60)}${RESET}`);
   log(`  ${CYAN}Target: ${config.smtp.to}${RESET}`);
   log(`  ${CYAN}SMTP  : ${config.smtp.host}:${config.smtp.port}${RESET}\n`);
 
-  // ── Unit tests (no network needed) ──
+  // Unit tests — no network or database required
   await testSmtpConfig();
   await testBuildExtremeEmail();
   await testBuildHighEmail();
   await testBuildPlainText();
 
-  // ── Integration tests (SMTP + DB) ──
+  // Integration tests — require working SMTP connection and database
   await testSmtpConnection();
   await testSendPlainEmail();
   await testSendExtremeAlert();
@@ -491,7 +526,7 @@ async function main() {
   await testRunRiskEmailAlerts_Extreme();
   await testRunRiskEmailAlerts_High();
 
-  // ── API tests (server must be running) ──
+  // API tests — require the Express server to be running on BASE
   const serverUp = await testApiHealth();
   if (serverUp) {
     await testApiTestEmail();
@@ -501,20 +536,20 @@ async function main() {
     await testApiAlertStatus();
   }
 
-  // ── Summary ──
+  // Print the final pass/fail/skip summary
   const total = passed + failed + skipped;
-  log(`\n${BOLD}${"═".repeat(60)}${RESET}`);
+  log(`\n${BOLD}${"=".repeat(60)}${RESET}`);
   log(`${BOLD}  Test Results: ${total} total${RESET}`);
-  log(`  ${GREEN}✓ Passed : ${passed}${RESET}`);
-  log(`  ${RED}✗ Failed : ${failed}${RESET}`);
-  log(`  ${YELLOW}⊘ Skipped: ${skipped}${RESET}`);
-  log(`${BOLD}${"═".repeat(60)}${RESET}\n`);
+  log(`  ${GREEN}Passed : ${passed}${RESET}`);
+  log(`  ${RED}Failed : ${failed}${RESET}`);
+  log(`  ${YELLOW}Skipped: ${skipped}${RESET}`);
+  log(`${BOLD}${"=".repeat(60)}${RESET}\n`);
 
   if (failed > 0) {
-    log(`${RED}${BOLD}  ⚠️  ${failed} test(s) failed. Check SMTP config and DB connection.${RESET}\n`);
+    log(`${RED}${BOLD}  ${failed} test(s) failed. Check SMTP config and DB connection.${RESET}\n`);
     process.exit(1);
   } else {
-    log(`${GREEN}${BOLD}  ✅ All tests passed!${RESET}\n`);
+    log(`${GREEN}${BOLD}  All tests passed.${RESET}\n`);
   }
 }
 

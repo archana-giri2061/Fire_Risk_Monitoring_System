@@ -1,64 +1,78 @@
-//Import application configuration values
-import { config } from "../config";
-// Import necessary package
+// WeatherSync.service.ts
+// Orchestrates the full weather data synchronisation pipeline.
+// Called by POST /api/weather/sync-all and by the scheduled sync job in app.ts.
+//
+// Pipeline steps:
+//   1. Delete archive rows older than the configured retention window
+//   2. Fetch fresh historical data from the Open-Meteo Archive API
+//   3. Fetch fresh forecast data from the Open-Meteo Forecast API
+//   4. Persist both datasets to the database
+//   5. Export the updated archive to a CSV file for the ML training scripts
+
+import { config }                  from "../config";
 import { fetchArchiveDailyWeather } from "./archive.service";
 import { fetchForecastDailyWeather } from "./forecast.service";
 import { upsertArchive, replaceForecast } from "./weatherStore.service";
 import { exportLiveWeatherDataset } from "./datasetExport.service";
-//Import PostgreSQL connection Pool
-import { pool } from "../db";
-/**
- * Convert a JavaScript Date object into YYYY-MM-DD format
- * Example: 2026-04-16
- */
+import { pool }                    from "../db";
+
+
+// Converts a JavaScript Date object to a YYYY-MM-DD string.
+// Used to build the start_date and end_date parameters for the Open-Meteo API calls.
 function toISODate(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
   const d = String(date.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
 }
-/**
- * Retry helper function
- * Executes an async function and retries if it fails
- *
- * @param fn       Function to execute
- * @param label    Name shown in logs
- * @param retries  Number of retry attempts
- * @param delayMs  Delay between retries in milliseconds
- */
+
+
+// Executes an async function and retries on failure up to the given number of attempts.
+// Used to make the Open-Meteo API calls resilient to transient network errors on EC2.
+// Logs a warning on each failed attempt so failures are visible in the server logs.
+// Waits delayMs between attempts to avoid hammering the API on repeated failures.
+// Throws the last error if all attempts are exhausted.
+//
+// Parameters:
+//   fn      : The async function to execute and potentially retry
+//   label   : Name shown in warning logs to identify which step failed
+//   retries : Maximum number of attempts (default 3)
+//   delayMs : Milliseconds to wait between attempts (default 3000)
 async function withRetry<T>(
-  fn: () => Promise<T>,
-  label: string,
-  retries = 3,
-  delayMs = 3000,
+  fn:       () => Promise<T>,
+  label:    string,
+  retries  = 3,
+  delayMs  = 3000,
 ): Promise<T> {
   let lastError: any;
-  //Try multiple times
+
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      return await fn();//return result if successful
+      return await fn();
     } catch (err: any) {
       lastError = err;
-      //log failed attempt
-      console.warn(`  ${label} failed (attempt ${attempt}/${retries}): ${err.message}`);
-      //Wait before next retry
+      console.warn(`${label} failed (attempt ${attempt}/${retries}): ${err.message}`);
+
+      // Wait before the next attempt unless this was the final one
       if (attempt < retries) {
         await new Promise((r) => setTimeout(r, delayMs));
       }
     }
   }
-  // Throw error after all retries fail
+
   throw lastError;
 }
 
-/**
- * Delete old archive weather data older than keepDays
- *
- * Keeps database clean by removing outdated historical rows
- *
- * @param keepDays Number of recent days to keep
- * @returns Number of deleted rows
- */
+
+// Deletes archive rows from daily_weather that fall outside the retention window.
+// Runs at the start of every sync to prevent unbounded table growth as days accumulate.
+// Only affects rows for the configured location and data_source='archive'.
+//
+// Parameters:
+//   keepDays: Number of most recent days to retain — rows older than this are deleted
+//
+// Returns:
+//   Number of rows deleted (0 if nothing was outside the window)
 async function deleteOldArchiveData(keepDays: number): Promise<number> {
   const result = await pool.query(
     `DELETE FROM daily_weather
@@ -69,35 +83,35 @@ async function deleteOldArchiveData(keepDays: number): Promise<number> {
   );
   return result.rowCount ?? 0;
 }
-/**
- * Main weather sync function
- *
- * Steps:
- * 1. Delete old archive data
- * 2. Fetch fresh historical weather data
- * 3. Fetch fresh forecast data
- * 4. Save data into database
- * 5. Export dataset for ML model
- */
+
+
+// Runs the full weather sync pipeline and returns a summary of what was processed.
+// Called by the POST /api/weather/sync-all route handler and by the scheduled
+// sync job in app.ts every cfg.syncIntervalMinutes minutes.
+//
+// Returns:
+//   An object with ok, deleted row count, archive result, forecast result,
+//   dataset export result, and the start/end date strings used for the sync.
 export async function syncWeatherData() {
-   // Today's date
+
+  // Calculate the date range: from today minus archiveDays up to today
   const end   = new Date();
-  // Start date = today - archiveDays
   const start = new Date();
   start.setDate(end.getDate() - config.archiveDays);
 
   const startDate = toISODate(start);
   const endDate   = toISODate(end);
 
-  console.log(`\n  Weather sync started: ${startDate} → ${endDate}`);
+  console.log(`Weather sync started: ${startDate} to ${endDate}`);
 
-  // Delete old data beyond our window
+  // Step 1: Remove archive rows outside the retention window before fetching new data
   const deleted = await deleteOldArchiveData(config.archiveDays);
   if (deleted > 0) {
-    console.log(`  Deleted ${deleted} old archive rows (keeping last ${config.archiveDays} days)`);
+    console.log(`Deleted ${deleted} old archive rows (keeping last ${config.archiveDays} days)`);
   }
 
-  // Fetch fresh archive from Open-Meteo
+  // Step 2: Fetch historical archive data from Open-Meteo with retry on failure.
+  // Returns one DailyWeatherRow per day in the startDate to endDate range.
   const archiveRows = await withRetry(
     () => fetchArchiveDailyWeather({
       latitude:   config.latitude,
@@ -108,7 +122,8 @@ export async function syncWeatherData() {
     "Archive fetch",
   );
 
-  // Fetch fresh 7-day forecast 
+  // Step 3: Fetch the upcoming forecast from Open-Meteo with retry on failure.
+  // Returns one DailyWeatherRow per forecast day (default 7 days ahead).
   const forecastRows = await withRetry(
     () => fetchForecastDailyWeather({
       latitude:  config.latitude,
@@ -118,7 +133,9 @@ export async function syncWeatherData() {
     "Forecast fetch",
   );
 
-  // ── Step 4: Save to DB 
+  // Step 4: Persist both datasets to the database.
+  // upsertArchive uses ON CONFLICT DO UPDATE so re-running never creates duplicates.
+  // replaceForecast deletes then re-inserts so stale forecast days are always removed.
   const archiveResult = await upsertArchive({
     location_key: config.locationKey,
     latitude:     config.latitude,
@@ -132,10 +149,11 @@ export async function syncWeatherData() {
     rows:      forecastRows,
   });
 
-  // ── Step 5: Export CSV dataset for ML
+  // Step 5: Export the updated archive data to CSV so the ML training scripts
+  // can read it directly from disk without needing their own database queries.
   const datasetResult = await exportLiveWeatherDataset(startDate, endDate);
 
-  console.log(` Sync complete — archive: ${archiveResult.insertedOrUpdated} rows, forecast: ${forecastResult.insertedOrUpdated} rows`);
+  console.log(`Sync complete — archive: ${archiveResult.insertedOrUpdated} rows, forecast: ${forecastResult.insertedOrUpdated} rows`);
 
   return {
     ok:        true,

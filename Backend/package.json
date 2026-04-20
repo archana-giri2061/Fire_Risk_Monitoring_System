@@ -6,7 +6,10 @@
     "dev": "ts-node-dev --respawn src/app.ts",
     "build": "python3 -m pip install -r ml/scripts/requirements.txt --break-system-packages --quiet && tsc",
     "start": "node --max-old-space-size=512 server.js",
-    "test": "jest --forceExit"
+    "test": "jest --coverage",
+    "test:watch": "jest --watch",
+    "test:backend": "jest auth.test.ts api.test.ts alert.test.ts features.test.ts risk.test.ts sensor.test.ts",
+    "test:frontend": "jest frontend.test.tsx"
   },
   "keywords": [],
   "author": "",
@@ -19,19 +22,27 @@
     "express": "^5.2.1",
     "nodemailer": "^8.0.2",
     "pg": "^8.19.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
     "twilio": "^5.12.2",
-    "typescript": "^5.9.3",
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
     "@types/nodemailer": "^7.0.11",
     "@types/pg": "^8.18.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@types/twilio": "^3.19.2",
     "jest": "^30.3.0",
+    "jest-environment-jsdom": "^30.3.0",
     "ts-jest": "^29.4.9",
-    "ts-node-dev": "^2.0.0"
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^6.0.3"
   }
 }

@@ -1,74 +1,88 @@
-/* ═══════════════════════════════════════════════════════════════
+/* ─────────────────────────────────────────────────────────────────────────
    theme.css — वन दृष्टि Fire Risk Monitoring System
-   Global design tokens, resets, shared utilities
-═══════════════════════════════════════════════════════════════ */
+   This file is the single source of truth for all design tokens, resets,
+   keyframe animations, and shared utility classes used across every page.
+   Import it once at the app root — nothing here is page-specific.
+───────────────────────────────────────────────────────────────────────── */
 
-/* ── Design Tokens ─────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────────────────
+   Design tokens
+   All colours, radii, widths, durations, and font stacks live here as CSS
+   custom properties so every component can reference them by name instead
+   of hardcoding raw values. Changing a token here updates the whole app.
+───────────────────────────────────────────────────────────────────────── */
 :root {
-  /* Backgrounds */
-  --bg-base:          #091c18;
-  --bg-surface:       rgba(255, 255, 255, 0.04);
-  --bg-surface-hover: rgba(255, 255, 255, 0.07);
-  --bg-sidebar:       rgba(8, 22, 18, 0.92);
 
-  /* Borders */
-  --border-subtle:  rgba(255, 255, 255, 0.06);
-  --border-default: rgba(255, 255, 255, 0.09);
-  --border-strong:  rgba(255, 255, 255, 0.15);
+  /* page and surface backgrounds */
+  --bg-base:          #091c18;                    /* darkest layer — the page background */
+  --bg-surface:       rgba(255, 255, 255, 0.04);  /* slightly lighter — used for cards */
+  --bg-surface-hover: rgba(255, 255, 255, 0.07);  /* card hover state */
+  --bg-sidebar:       rgba(8, 22, 18, 0.92);      /* sidebar panel background */
 
-  /* Text */
-  --text-primary:   #ffffff;
-  --text-secondary: rgba(255, 255, 255, 0.60);
-  --text-muted:     rgba(255, 255, 255, 0.38);
-  --text-label:     rgba(255, 255, 255, 0.45);
+  /* border colours at three levels of emphasis */
+  --border-subtle:  rgba(255, 255, 255, 0.06);  /* very faint — dividers inside cards */
+  --border-default: rgba(255, 255, 255, 0.09);  /* standard card and input border */
+  --border-strong:  rgba(255, 255, 255, 0.15);  /* high-contrast border for modals */
 
-  /* Risk palette */
-  --risk-low:           #9DC88D;
-  --risk-low-bg:        rgba(157, 200, 141, 0.15);
-  --risk-low-border:    rgba(157, 200, 141, 0.30);
-  --risk-moderate:      #F1B24A;
-  --risk-moderate-bg:   rgba(241, 178, 74,  0.15);
-  --risk-moderate-border: rgba(241, 178, 74, 0.30);
-  --risk-high:          #FF8C42;
-  --risk-high-bg:       rgba(255, 140, 66,  0.15);
-  --risk-high-border:   rgba(255, 140, 66,  0.30);
-  --risk-extreme:       #FF4D4D;
-  --risk-extreme-bg:    rgba(255, 77,  77,  0.15);
-  --risk-extreme-border: rgba(255, 77,  77, 0.30);
+  /* text colours at four levels of emphasis */
+  --text-primary:   #ffffff;                    /* headings and important values */
+  --text-secondary: rgba(255, 255, 255, 0.60);  /* body copy */
+  --text-muted:     rgba(255, 255, 255, 0.38);  /* timestamps and metadata */
+  --text-label:     rgba(255, 255, 255, 0.45);  /* uppercase section labels */
 
-  /* Accent colours */
+  /* fire risk tier — each tier has a base colour, a tinted background, and a border */
+  --risk-low:             #9DC88D;
+  --risk-low-bg:          rgba(157, 200, 141, 0.15);
+  --risk-low-border:      rgba(157, 200, 141, 0.30);
+
+  --risk-moderate:        #F1B24A;
+  --risk-moderate-bg:     rgba(241, 178, 74,  0.15);
+  --risk-moderate-border: rgba(241, 178, 74,  0.30);
+
+  --risk-high:            #FF8C42;
+  --risk-high-bg:         rgba(255, 140, 66,  0.15);
+  --risk-high-border:     rgba(255, 140, 66,  0.30);
+
+  --risk-extreme:         #FF4D4D;
+  --risk-extreme-bg:      rgba(255, 77,  77,  0.15);
+  --risk-extreme-border:  rgba(255, 77,  77,  0.30);
+
+  /* accent colours used for non-risk UI elements like info badges and charts */
   --blue:   #60A5FA;
   --purple: #A78BFA;
-  --green:  var(--risk-low);
-  --amber:  var(--risk-moderate);
+  --green:  var(--risk-low);      /* alias so components can use --green without knowing risk */
+  --amber:  var(--risk-moderate); /* alias so components can use --amber without knowing risk */
 
-  /* Radii */
+  /* border radius scale — use the named steps rather than raw pixel values */
   --r-sm:   8px;
   --r-md:   12px;
   --r-lg:   16px;
   --r-xl:   20px;
-  --r-full: 9999px;
+  --r-full: 9999px; /* pill shape for buttons and badges */
 
-  /* Sidebar */
-  --sidebar-w:  220px;
-  --sidebar-col: 68px;
+  /* sidebar dimensions — referenced in both the sidebar component and page layout */
+  --sidebar-w:   220px; /* expanded width */
+  --sidebar-col: 68px;  /* collapsed (icon-only) width */
 
-  /* Transitions */
-  --t-fast: 0.15s ease;
-  --t-base: 0.25s ease;
-  --t-slow: 0.40s ease;
+  /* transition durations — use these instead of raw milliseconds */
+  --t-fast: 0.15s ease; /* micro-interactions: hover tints, icon swaps */
+  --t-base: 0.25s ease; /* standard state changes: sidebar collapse, modal fade */
+  --t-slow: 0.40s ease; /* large layout shifts: panel slide-ins */
 
-  /* Font */
-  --font: 'Inter', 'Segoe UI', system-ui, sans-serif;
-  --font-dev: 'Noto Sans Devanagari', 'Mukta', sans-serif;
+  /* font stacks */
+  --font:     'Inter', 'Segoe UI', system-ui, sans-serif; /* Latin UI text */
+  --font-dev: 'Noto Sans Devanagari', 'Mukta', sans-serif; /* Devanagari script for the logo */
 }
 
-/* ── Reset ──────────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────────────────
+   Reset
+   Normalises browser defaults so layout behaves consistently everywhere.
+───────────────────────────────────────────────────────────────────────── */
 *,
 *::before,
 *::after {
-  box-sizing: border-box;
-  margin: 0;
+  box-sizing: border-box; /* padding and border are included in element dimensions */
+  margin:  0;
   padding: 0;
 }
 
@@ -77,34 +91,61 @@ body,
 #root {
   min-height: 100vh;
   background: var(--bg-base);
-  color: var(--text-primary);
+  color:      var(--text-primary);
   font-family: var(--font);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  -webkit-font-smoothing:  antialiased;   /* crisper text on macOS/iOS */
+  -moz-osx-font-smoothing: grayscale;     /* crisper text on Firefox on macOS */
 }
 
+/* strip the default blue underline from all links — components style their own states */
 a { text-decoration: none; color: inherit; }
 
-/* ── Scrollbar ─────────────────────────────────────────────── */
-::-webkit-scrollbar        { width: 5px; height: 5px; }
-::-webkit-scrollbar-track  { background: transparent; }
-::-webkit-scrollbar-thumb  { background: rgba(157, 200, 141, 0.22); border-radius: var(--r-full); }
-::-webkit-scrollbar-thumb:hover { background: rgba(157, 200, 141, 0.42); }
+/* ─────────────────────────────────────────────────────────────────────────
+   Scrollbar
+   Replaces the browser's default grey scrollbar with a thin green-tinted one
+   that matches the app's dark theme. Only applies in WebKit-based browsers.
+───────────────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar              { width: 5px; height: 5px; }
+::-webkit-scrollbar-track        { background: transparent; }
+::-webkit-scrollbar-thumb        { background: rgba(157, 200, 141, 0.22); border-radius: var(--r-full); }
+::-webkit-scrollbar-thumb:hover  { background: rgba(157, 200, 141, 0.42); }
 
-/* ── App shell ─────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────────────────
+   App shell
+   Root wrapper that ensures the page always fills the full viewport height.
+───────────────────────────────────────────────────────────────────────── */
 .app-shell { min-height: 100vh; background: var(--bg-base); }
 
-/* ── Keyframes ─────────────────────────────────────────────── */
-@keyframes spin    { to { transform: rotate(360deg); } }
-@keyframes pulse   { 0%,100% { opacity:1; transform:scale(1) } 50% { opacity:.5; transform:scale(1.35) } }
-@keyframes fadeUp  { from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:translateY(0) } }
-@keyframes glow    { 0%,100% { box-shadow:0 0 0 0 transparent } 50% { box-shadow:0 0 18px 2px rgba(255,77,77,.35) } }
+/* ─────────────────────────────────────────────────────────────────────────
+   Keyframe animations
+   Defined once here and referenced by name in utility classes and inline
+   styles throughout the app so timing stays consistent.
+───────────────────────────────────────────────────────────────────────── */
 
-/* ── Utility classes ───────────────────────────────────────── */
-.spin     { animation: spin  0.8s linear infinite; }
-.fade-up  { animation: fadeUp 0.3s ease forwards; }
+/* continuous 360-degree rotation — used by the loading spinner and the syncing refresh icon */
+@keyframes spin   { to { transform: rotate(360deg); } }
 
-/* Card */
+/* breathing scale + opacity fade — used by the pulsing "Live" dot in the dashboard header */
+@keyframes pulse  { 0%,100% { opacity:1; transform:scale(1) } 50% { opacity:.5; transform:scale(1.35) } }
+
+/* slide up from 8 px below and fade in — used for toast notifications and cards entering the view */
+@keyframes fadeUp { from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:translateY(0) } }
+
+/* red glow pulse — used on the fire-emergency banner to draw the operator's eye */
+@keyframes glow   { 0%,100% { box-shadow:0 0 0 0 transparent } 50% { box-shadow:0 0 18px 2px rgba(255,77,77,.35) } }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Utility classes
+   Composable single-purpose classes that can be added to any element.
+───────────────────────────────────────────────────────────────────────── */
+
+/* apply the spin animation to a loading icon — e.g. <RefreshCw className="spin" /> */
+.spin    { animation: spin   0.8s linear infinite; }
+
+/* apply the slide-up entrance animation once when an element is inserted into the DOM */
+.fade-up { animation: fadeUp 0.3s ease forwards; }
+
+/* standard glass-panel card used across every page section */
 .card {
   background:    var(--bg-surface);
   border:        1px solid var(--border-default);
@@ -112,11 +153,13 @@ a { text-decoration: none; color: inherit; }
   padding:       18px 20px;
 }
 
-/* Risk bar */
+/* thin horizontal bar that represents a probability or percentage — fill width is set inline */
 .risk-bar { height: 5px; background: rgba(255,255,255,0.08); border-radius: var(--r-full); overflow: hidden; }
+
+/* the coloured portion of the risk bar — width is driven by a JS-computed inline style */
 .risk-bar__fill { height: 100%; border-radius: var(--r-full); transition: width 0.9s ease; }
 
-/* Label caps */
+/* small all-caps section label used above cards and panels, e.g. "7-Day Risk" */
 .label-caps {
   font-size:      11px;
   color:          var(--text-label);
@@ -124,29 +167,35 @@ a { text-decoration: none; color: inherit; }
   letter-spacing: 0.8px;
 }
 
-/* Spinner */
+/* centred loading spinner shown on full-page loading screens */
 .spinner {
-  width: 46px; height: 46px;
+  width:  46px;
+  height: 46px;
   border-radius: 50%;
-  border: 3px solid rgba(157,200,141,0.18);
-  border-top-color: var(--risk-low);
+  border:           3px solid rgba(157,200,141,0.18); /* faint full ring */
+  border-top-color: var(--risk-low);                  /* one bright arc that spins */
   animation: spin 0.85s linear infinite;
 }
 
-/* Grid helpers */
+/* responsive grid helpers — use these instead of writing grid CSS inline every time */
 .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 
+/* collapse 4-column grids to 2 columns on medium screens */
 @media (max-width: 1100px) { .grid-4 { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 768px)  { .grid-2,.grid-3,.grid-4 { grid-template-columns: 1fr; } }
 
-/* Page layout */
-.page-wrap   { display: flex; min-height: 100vh; }
-.page-main   { flex: 1; min-width: 0; padding: 28px; overflow-x: hidden; }
+/* collapse all grids to single column on mobile */
+@media (max-width: 768px)  { .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; } }
+
+/* page wrapper that places the sidebar and main content side by side */
+.page-wrap { display: flex; min-height: 100vh; }
+
+/* scrollable main content area — reduced padding on mobile */
+.page-main { flex: 1; min-width: 0; padding: 28px; overflow-x: hidden; }
 @media (max-width: 768px) { .page-main { padding: 16px; } }
 
-/* Top bar */
+/* sticky top bar shared by all pages — blurred glass panel pinned to the viewport top */
 .topbar {
   padding:         14px 24px;
   display:         flex;
@@ -154,32 +203,33 @@ a { text-decoration: none; color: inherit; }
   justify-content: space-between;
   border-bottom:   1px solid var(--border-subtle);
   background:      rgba(8,22,18,0.65);
-  backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);  /* blur the page content visible through the translucent background */
   position:        sticky;
   top:             0;
-  z-index:         10;
+  z-index:         10; /* sits above all page content but below modals */
   gap:             10px;
 }
 @media (max-width: 768px) { .topbar { padding: 12px 16px; } }
 
-/* Button base */
+/* base button style — all colour variants extend this */
 .btn {
-  display:     inline-flex;
-  align-items: center;
-  gap:         6px;
-  padding:     8px 14px;
-  border-radius: var(--r-full);
-  font-size:   12px;
-  font-weight: 700;
-  cursor:      pointer;
-  border:      1px solid transparent;
-  transition:  opacity var(--t-fast);
-  white-space: nowrap;
+  display:       inline-flex;
+  align-items:   center;
+  gap:           6px;
+  padding:       8px 14px;
+  border-radius: var(--r-full); /* pill shape */
+  font-size:     12px;
+  font-weight:   700;
+  cursor:        pointer;
+  border:        1px solid transparent;
+  transition:    opacity var(--t-fast);
+  white-space:   nowrap; /* prevent label wrapping on narrow buttons */
 }
-.btn:hover   { opacity: 0.85; }
-.btn:active  { opacity: 0.70; }
+.btn:hover    { opacity: 0.85; }
+.btn:active   { opacity: 0.70; }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+/* coloured button variants — each uses the matching risk or accent token */
 .btn-green  { background: rgba(157,200,141,.13); border-color: rgba(157,200,141,.28); color: var(--risk-low);      }
 .btn-amber  { background: rgba(241,178,74,.15);  border-color: rgba(241,178,74,.30);  color: var(--risk-moderate); }
 .btn-orange { background: rgba(255,140,66,.15);  border-color: rgba(255,140,66,.30);  color: var(--risk-high);     }
@@ -187,19 +237,21 @@ a { text-decoration: none; color: inherit; }
 .btn-blue   { background: rgba(96,165,250,.13);  border-color: rgba(96,165,250,.28);  color: var(--blue);          }
 .btn-ghost  { background: rgba(255,255,255,.05); border-color: var(--border-default); color: var(--text-secondary); }
 
-/* Admin badge */
+/* amber pill badge shown in the header when an admin key is loaded —
+   clicking it logs the user out, so it has cursor: pointer */
 .admin-badge {
-  padding: 6px 12px;
+  padding:       6px 12px;
   border-radius: var(--r-full);
-  background: rgba(241,178,74,0.12);
-  border: 1px solid rgba(241,178,74,0.30);
-  color: var(--risk-moderate);
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
+  background:    rgba(241,178,74,0.12);
+  border:        1px solid rgba(241,178,74,0.30);
+  color:         var(--risk-moderate);
+  font-size:     12px;
+  font-weight:   700;
+  cursor:        pointer;
 }
 
-/* Alert flash banner */
+/* base layout for inline status banners — colour is applied inline by each component
+   because the tint depends on the severity of the message (success, error, info) */
 .alert-banner {
   padding:       12px 16px;
   border-radius: var(--r-lg);

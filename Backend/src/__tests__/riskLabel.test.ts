@@ -1,6 +1,12 @@
-// UT-37
-// Tests: CODE_TO_LABEL returns correct label for each risk code
+// riskLabel.test.ts
+// Unit tests for UT-37: CODE_TO_LABEL mapping.
+// Verifies that each numeric risk code produced by the XGBoost model
+// maps to the correct human-readable label string used in API responses,
+// email alerts, and the frontend dashboard.
 
+// Maps the integer risk codes output by the trained model to their
+// corresponding label strings. Must stay in sync with code_to_label()
+// in feature_label.py and RISK_RANK in email_helpers.py.
 const CODE_TO_LABEL: Record<number, string> = {
   0: "Low",
   1: "Moderate",
@@ -10,29 +16,29 @@ const CODE_TO_LABEL: Record<number, string> = {
 
 describe("UT-37 — Risk label function (CODE_TO_LABEL)", () => {
 
-  // UT-37 — code 0 returns Low
   test("UT-37a: returns Low for risk code 0", () => {
+    // Code 0 is the lowest risk level, typical for cool humid days
     expect(CODE_TO_LABEL[0]).toBe("Low");
   });
 
-  // UT-37 — code 1 returns Moderate
   test("UT-37b: returns Moderate for risk code 1", () => {
+    // Code 1 indicates elevated but not critical conditions
     expect(CODE_TO_LABEL[1]).toBe("Moderate");
   });
 
-  // UT-37 — code 2 returns High
   test("UT-37c: returns High for risk code 2", () => {
+    // Code 2 triggers alert emails via run_risk_email_alerts()
     expect(CODE_TO_LABEL[2]).toBe("High");
   });
 
-  // UT-37 — code 3 returns Extreme
   test("UT-37d: returns Extreme for risk code 3", () => {
+    // Code 3 is the highest severity — also triggers IoT auto-alert in predict_iot.py
     expect(CODE_TO_LABEL[3]).toBe("Extreme");
   });
 
-  // Extra — all four codes exist
   test("all four risk codes are defined", () => {
+    // Ensures no code was accidentally removed or a fifth was added,
+    // which would break the model output mapping across all scripts
     expect(Object.keys(CODE_TO_LABEL)).toHaveLength(4);
   });
-
 });
